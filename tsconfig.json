@@ -1,9 +1,9 @@
 {
-  "compilerOptions": {
-    "noEmit": true,
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "allowImportingTsExtensions": true,
-    "esModuleInterop": true
-  }
+  "files": [],
+  "references": [
+    { "path": "./packages/domain" },
+    { "path": "./apps/website" },
+    { "path": "./apps/server" },
+    { "path": "./packages/manager-api" }
+  ]
 }

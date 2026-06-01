@@ -4,12 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "ready": "vp fmt && vp lint && vp run test -r && vp run build -r",
-    "dev": "vp run website#dev",
-    "prepare": "vp config"
+    "build": "tsgo -b tsconfig.json",
+    "ready": "vp fmt && vp lint && pnpm test && pnpm build && pnpm --filter website bundle",
+    "check": "vp check && pnpm build",
+    "dev": "vp run --filter website --filter server --parallel --log labeled dev",
+    "dev:server": "vp run server#dev",
+    "prepare": "vp config && effect-tsgo patch",
+    "test": "vitest",
+    "test:website-sync-controller": "vitest apps/website/tests/ManagerAkahuSyncController.test.ts"
   },
   "devDependencies": {
-    "vite-plus": "catalog:"
+    "@effect/language-service": "catalog:",
+    "@effect/tsgo": "0.13.1",
+    "@effect/vitest": "4.0.0-beta.76",
+    "@typescript/native-preview": "latest",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=22.12.0"
