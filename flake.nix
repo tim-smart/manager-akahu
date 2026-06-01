@@ -14,6 +14,7 @@
           packages = with pkgs; [
             bun
             corepack
+            mkcert
             nodejs
           ];
         };
