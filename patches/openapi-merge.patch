@@ -1,0 +1,23 @@
+diff --git a/dist/paths-and-components.js b/dist/paths-and-components.js
+index 9173e1518252cedbd9440cd897e0a8d02d77cea0..118d7e3e8f99d900ca36304b5320ea52d47e2114 100644
+--- a/dist/paths-and-components.js
++++ b/dist/paths-and-components.js
+@@ -236,16 +236,10 @@ function mergePathsAndComponents(inputs) {
+             if (originalPath !== newPath) {
+                 referenceModification[`#/paths/${originalPath}`] = `#/paths/${newPath}`;
+             }
+-            // TODO perform more advanced matching for an existing path than an equals check
+-            if (result.paths[newPath] !== undefined) {
+-                return {
+-                    type: 'duplicate-paths',
+-                    message: `Input ${inputIndex}: The path '${originalPath}' maps to '${newPath}' and this has already been added by another input file`
+-                };
+-            }
+             const copyPathItem = oas.paths[originalPath];
+             ensureUniqueOperationIds(copyPathItem, seenOperationIds, dispute);
+-            result.paths[newPath] = copyPathItem;
++            result.paths[newPath] ??= {}
++            Object.assign(result.paths[newPath], copyPathItem)
+         }
+         // Update the references to point to the right location
+         const modifiedKeys = Object.keys(referenceModification);
