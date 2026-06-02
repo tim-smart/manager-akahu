@@ -1,6 +1,6 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import "./index.css";
+import { StrictMode } from "react"
+import { createRoot } from "react-dom/client"
+import "./index.css"
 
 function App() {
   return (
@@ -18,11 +18,11 @@ function App() {
         </p>
       </section>
     </main>
-  );
+  )
 }
 
 createRoot(document.getElementById("app")!).render(
   <StrictMode>
     <App />
   </StrictMode>,
-);
+)

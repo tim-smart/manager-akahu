@@ -9,11 +9,12 @@
     "preview": "vp preview"
   },
   "dependencies": {
+    "@app/manager-api": "workspace:*",
     "@effect/atom-react": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
-    "effect": "4.0.0-beta.74",
+    "effect": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
@@ -26,7 +27,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "typescript": "~6.0.2",
-    "vite": "catalog:",
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
     "vite-plus": "catalog:"
   }
 }

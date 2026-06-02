@@ -1,4 +1,4 @@
-import { defineConfig } from "vite-plus";
+import { defineConfig } from "vite-plus"
 
 export default defineConfig({
   staged: {
@@ -10,5 +10,6 @@ export default defineConfig({
   },
   fmt: {
     ignorePatterns: ["dist", "vendor"],
+    semi: false,
   },
-});
+})
