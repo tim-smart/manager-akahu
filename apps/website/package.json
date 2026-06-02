@@ -9,6 +9,7 @@
     "preview": "vp preview"
   },
   "dependencies": {
+    "@app/domain": "workspace:*",
     "@app/manager-api": "workspace:*",
     "@effect/atom-react": "catalog:",
     "@tailwindcss/vite": "catalog:",
@@ -16,6 +17,7 @@
     "clsx": "catalog:",
     "effect": "catalog:",
     "lucide-react": "catalog:",
+    "radix-ui": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "tailwind-merge": "catalog:",

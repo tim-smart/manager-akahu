@@ -1,7 +1,6 @@
 import { Context, Deferred, Effect, Exit, Layer } from "effect"
 import * as ManagerClient from "@app/manager-api/ManagerClient"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"
-import { Atom } from "effect/unstable/reactivity"
 
 export class Manager extends Context.Service<Manager, ManagerClient.Client>()("Manager", {
   make: Effect.gen(function* () {
@@ -10,7 +9,6 @@ export class Manager extends Context.Service<Manager, ManagerClient.Client>()("M
   }),
 }) {
   static layer = Layer.effect(this, this.make)
-  static runtime = Atom.runtime(Manager.layer)
 }
 
 const makeIframeHttpClient = Effect.gen(function* () {
@@ -43,6 +41,11 @@ const makeIframeHttpClient = Effect.gen(function* () {
       const requestId = crypto.randomUUID()
       const deferred = Deferred.makeUnsafe<Response>()
       deferreds.set(requestId, deferred)
+
+      yield* Effect.log({
+        request,
+        requestId,
+      })
 
       window.parent.postMessage(
         {

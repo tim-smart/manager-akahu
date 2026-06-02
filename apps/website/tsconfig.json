@@ -19,7 +19,14 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
 
-    "noEmit": true
+    "noEmit": true,
+
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [{ "path": "../../packages/domain" }]
 }

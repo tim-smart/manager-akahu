@@ -7,7 +7,7 @@ catalogMode: prefer
 
 catalog:
   "@types/node": ^24
-  typescript: ^5
+  typescript: ^5.9.3
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vitest: npm:@voidzero-dev/vite-plus-test@latest
   vite-plus: latest
@@ -31,6 +31,7 @@ catalog:
   "@tim-smart/openapi-gen": ^1.0.4
   "@typescript/native-preview": 7.0.0-dev.20260527.2
   "@effect/language-service": ^0.86.2
+  radix-ui: ^1.4.3
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
@@ -52,3 +53,11 @@ minimumReleaseAgeExclude:
   - "@effect/platform-node-shared@4.0.0-beta.75"
   - "@effect/platform-node@4.0.0-beta.75"
   - effect@4.0.0-beta.75
+  - "@effect/tsgo-darwin-arm64@0.13.1"
+  - "@effect/tsgo-darwin-x64@0.13.1"
+  - "@effect/tsgo-linux-arm64@0.13.1"
+  - "@effect/tsgo-linux-arm@0.13.1"
+  - "@effect/tsgo-linux-x64@0.13.1"
+  - "@effect/tsgo-win32-arm64@0.13.1"
+  - "@effect/tsgo-win32-x64@0.13.1"
+  - "@effect/tsgo@0.13.1"
