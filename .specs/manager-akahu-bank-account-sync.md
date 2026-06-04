@@ -879,6 +879,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Strengthen `apps/website/tests/ManagerAkahuSyncController.test.ts` so it does not only use a fake setter that executes functional updaters immediately. Add a deferred/asynchronous setter or actual hook/controller harness that proves start is atomic under React-like scheduling: starting must either transition to `running` and launch exactly one runner with the selected accounts, or do neither. It must never leave the dialog in `running` with no launched sync or a clear guard. (completed with deferred setter coverage for valid double-start and invalid start)
 - Validation: `pnpm test:website-sync-controller` and `pnpm --filter website build` pass. Website build reports Vite's existing large-chunk warning.
 
+### Task 7 React-updater follow-up review: Accept controller stateRef boundary (completed)
+
+- Deep code-quality review found no new actionable structural follow-up for the React-updater side-effect removal. Keep the controller-owned `stateRef` synchronized through one value-only local setter, keep the start decision/account capture/`running` transition/current-tab guard update in one synchronous controller transaction, and keep the sync runner launched outside React state updates through the shared promise failure path.
+- Do not reintroduce functional state-updater side effects, render-captured dialog state as the start authority, or a test fake that only proves eager updater execution. Keep the deferred setter coverage in `apps/website/tests/ManagerAkahuSyncController.test.ts` as the regression guard that start either launches exactly one sync and queues `running`, or does neither.
+- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test:website-sync-controller` and `pnpm --filter website build` passing.
+
 ## Open questions
 
 None. Decisions made for this specification:
