@@ -626,6 +626,15 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add focused regression tests for invalid calendar components through both boundaries, including an Akahu offset string that preserves its raw value while returning the derived leading Manager date and a Manager existing-entry date that must be exact `yyyy-mm-dd`. (completed)
 - Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build` pass.
 
+### Task 4 follow-up review follow-up audit follow-up review: Make Akahu calendar-date derivation a decoded boundary
+
+- Replace the remaining branded-raw-string-only Akahu transaction date contract with a domain-owned decoded value model, schema transform, or equivalent boundary that preserves the raw Akahu date string and carries the already-validated leading Manager `yyyy-mm-dd` calendar date. The current helper centralizes the parser, but it still re-parses the branded string and keeps a defensive throw after decode instead of making the derived date part of the proven domain value.
+- Ensure settled and pending Akahu transaction models expose the derived calendar date without repeated parsing in manager-api sync helpers. If the external RPC/wire `date` field must stay as the raw string for compatibility, keep that public shape explicit but add a canonical decoded transaction-date view for sync service code so callers do not recover the same invariant through fallible helpers.
+- Delete the thin `formatManagerAkahuDate` wrapper in `packages/manager-api/src/ManagerAkahuTransactionSync.ts` once manager-api can consume the domain-owned derived calendar date directly. Avoid carrying both `formatManagerAkahuDate` and `getAkahuTransactionCalendarDate` as pass-through public APIs.
+- Keep Manager existing receipt/payment date handling separate from Akahu raw-date handling. Continue to reuse only the exact canonical `parseCalendarDate` primitive for Manager-side `yyyy-mm-dd` strings and pending-to-settled date-window comparisons.
+- Add focused tests that decoded Akahu transactions preserve an offset raw date string while exposing the derived Manager calendar date, invalid Akahu calendar components still fail at the domain/RPC decode boundary, and Manager existing-entry dates still require exact `yyyy-mm-dd` parsing.
+- Validation: run `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build`.
+
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
 - Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
