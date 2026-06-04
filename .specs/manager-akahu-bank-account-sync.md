@@ -422,6 +422,13 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Avoid adding new wrapper helpers solely for tests. If assertion helpers are introduced, they should remove duplicated branch guards and payload literals rather than creating another abstraction layer around `buildManagerSuspenseImportDecision`.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
+### Task 1 follow-up review follow-up audit: Tighten private suspense payload construction boundary
+
+- Simplify the private Manager suspense payload construction path in `packages/manager-api/src/ManagerCompatibility.ts`. `ManagerSuspensePayloadInput` currently appears to narrow the private receipt/payment constructor input, but `buildManagerSuspenseImportDecision` spreads the full decision input into `payloadInput`, so structural typing silently carries `signedNormalizedAmount` and `importabilityDecision` through a boundary that should not know about them.
+- Remove that fake private boundary or make it exact. After importability and zero-amount handling, destructure/build a local object containing only `bankOrCashAccountKey`, `date`, `reference`, `description`, `fdxTransactionId`, `clearance`, and the normalized absolute `amount`, then pass that exact shape into the private receipt/payment constructors.
+- Prefer inlining or deleting `ManagerSuspensePayloadInput` if that makes the flow more direct. Do not add new public API or test-only wrappers; keep public behavior and the focused compatibility tests unchanged.
+- Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
+
 ### Task 2: Pagination foundations
 
 - Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present.
