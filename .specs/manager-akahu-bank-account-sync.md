@@ -646,6 +646,15 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Keep Manager existing receipt/payment date handling separate from Akahu raw-date handling. This follow-up should not reintroduce `formatManagerAkahuDate`, route Manager dates through Akahu helpers, or add another pass-through wrapper around `date.calendarDate`. (completed)
 - Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build` pass. The manager-api focused test required the domain package to be built first because the workspace package export resolves through `packages/domain/dist`.
 
+### Task 4 follow-up review follow-up audit follow-up review follow-up review: Make the Akahu date value schema own its invariants
+
+- Tighten `packages/domain/src/Akahu.ts` so `AkahuTransactionDateValue` does not describe `calendarDate` as `Schema.String` and then override the member with `declare readonly calendarDate: CalendarDate`. The current shape keeps the real invariant split between the transform and a TypeScript declaration, while the class schema/AST still says the decoded field is just a string.
+- Reuse the exported canonical `CalendarDate` schema in the class field itself, for example `calendarDate: CalendarDate`, importing the schema value rather than only the type. This makes the decoded Akahu date model self-describing for Effect Schema, RPC/OpenAPI/schema tooling, and future local constructors instead of relying on callers to remember that this string is special.
+- Prefer Effect's class branding pattern for the nominal layer, such as `Schema.Class<AkahuTransactionDateValue, Brand.Brand<"akahu/TransactionDate">>` or a local unique-symbol brand, instead of a `declare private readonly AkahuTransactionDateNominal` side channel. That keeps nominality attached to the schema class definition and avoids a hidden field whose only job is to influence structural assignment.
+- Keep the existing single fallible raw-string transform and Manager-side date separation. This follow-up should not reintroduce duplicate parsing, `formatManagerAkahuDate`, or Akahu helpers for Manager receipt/payment dates.
+- Add a focused type/runtime regression that the public decoded type's `calendarDate` is the shared `CalendarDate` type and that decoding still returns a nominal Akahu date value whose raw string encodes back unchanged. Preserve the intentional unsafe test escape hatch only for tests that need inconsistent structural values.
+- Validation: run `pnpm --filter @app/domain build`, then `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, and `pnpm --filter @app/manager-api build`.
+
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
 - Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
