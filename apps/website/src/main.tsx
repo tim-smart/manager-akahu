@@ -12,7 +12,7 @@ import type {
 } from "@app/domain/Manager/AkahuCustomFields"
 import { Button } from "@/components/ui/button"
 import type { ManagerAkahuTransactionSyncSummary } from "./Manager/SyncFlows"
-import { SyncDialog, SyncDialogTriggerButton } from "./Manager/SyncDialog"
+import { SyncControls, type SyncControlActions } from "./Manager/SyncDialog"
 import { useManagerAkahuSyncController } from "./Manager/useManagerAkahuSyncController"
 
 function App() {
@@ -25,27 +25,26 @@ function App() {
 
   return (
     <main className="min-h-svh bg-background px-4 py-10 text-foreground sm:px-6 sm:py-16">
-      <SyncDialog
-        state={syncController.state}
-        onCancel={syncController.close}
-        onStart={syncController.start}
-      >
-        <section className="mx-auto flex max-w-4xl flex-col gap-8 rounded-xl border bg-card p-6 shadow-sm sm:p-8">
-          {AsyncResult.matchWithWaiting(setupState, {
-            onWaiting: () => <LoadingSetup />,
-            onError: () => <RetryableError onRetry={refreshSetupState} />,
-            onDefect: () => <RetryableError onRetry={refreshSetupState} />,
-            onSuccess: ({ value }) => (
-              <SetupStateView
-                setupState={value}
-                onRetry={refreshSetupState}
-                onSync={syncController.open}
-                syncDisabled={syncController.isRunning}
-              />
+      <section className="mx-auto flex max-w-4xl flex-col gap-8 rounded-xl border bg-card p-6 shadow-sm sm:p-8">
+        {AsyncResult.matchWithWaiting(setupState, {
+          onWaiting: () => <LoadingSetup />,
+          onError: () => <RetryableError onRetry={refreshSetupState} />,
+          onDefect: () => <RetryableError onRetry={refreshSetupState} />,
+          onSuccess: ({ value }) =>
+            value._tag === "ready" ? (
+              <SyncControls
+                state={syncController.state}
+                onOpen={syncController.open}
+                onCancel={syncController.close}
+                onStart={syncController.start}
+              >
+                {(syncActions) => <ReadySetupState setupState={value} syncActions={syncActions} />}
+              </SyncControls>
+            ) : (
+              <SetupStateView setupState={value} onRetry={refreshSetupState} />
             ),
-          })}
-        </section>
-      </SyncDialog>
+        })}
+      </section>
     </main>
   )
 }
@@ -61,10 +60,8 @@ function LoadingSetup() {
 }
 
 function SetupStateView(props: {
-  readonly setupState: ManagerAkahuSetupState
+  readonly setupState: Exclude<ManagerAkahuSetupState, { readonly _tag: "ready" }>
   readonly onRetry: () => void
-  readonly onSync: (accounts: ReadonlyArray<LinkedAccount>) => void
-  readonly syncDisabled: boolean
 }) {
   switch (props.setupState._tag) {
     case "loading":
@@ -112,33 +109,6 @@ function SetupStateView(props: {
           <StaleSelections selections={props.setupState.staleSelections} />
         </SetupStack>
       )
-    case "ready":
-      const readySetupState = props.setupState
-      return (
-        <SetupStack>
-          <SetupMessage
-            eyebrow="Ready"
-            title="Linked bank accounts"
-            description="These Manager bank/cash accounts are linked to current Akahu accounts and can sync transactions already available from Akahu."
-            action={
-              <SyncDialogTriggerButton
-                accounts={readySetupState.accounts}
-                className="w-fit"
-                disabled={props.syncDisabled}
-                onSync={props.onSync}
-              >
-                Sync all
-              </SyncDialogTriggerButton>
-            }
-          />
-          <StaleSelections selections={readySetupState.staleSelections} />
-          <Accounts
-            accounts={readySetupState.accounts}
-            syncDisabled={props.syncDisabled}
-            onSync={props.onSync}
-          />
-        </SetupStack>
-      )
     case "error":
       return (
         <SetupMessage
@@ -149,6 +119,24 @@ function SetupStateView(props: {
         />
       )
   }
+}
+
+function ReadySetupState(props: {
+  readonly setupState: Extract<ManagerAkahuSetupState, { readonly _tag: "ready" }>
+  readonly syncActions: SyncControlActions
+}) {
+  return (
+    <SetupStack>
+      <SetupMessage
+        eyebrow="Ready"
+        title="Linked bank accounts"
+        description="These Manager bank/cash accounts are linked to current Akahu accounts and can sync transactions already available from Akahu."
+        action={props.syncActions.syncAllButton(props.setupState.accounts)}
+      />
+      <StaleSelections selections={props.setupState.staleSelections} />
+      <Accounts accounts={props.setupState.accounts} syncActions={props.syncActions} />
+    </SetupStack>
+  )
 }
 
 function SetupStack(props: { readonly children: ReactNode }) {
@@ -198,8 +186,7 @@ function RetryButton(props: { readonly onRetry: () => void }) {
 
 function Accounts(props: {
   readonly accounts: ReadonlyArray<LinkedAccount>
-  readonly syncDisabled: boolean
-  readonly onSync: (accounts: ReadonlyArray<LinkedAccount>) => void
+  readonly syncActions: SyncControlActions
 }) {
   return (
     <ul className="grid gap-3 md:grid-cols-2">
@@ -217,14 +204,7 @@ function Accounts(props: {
                 value={account.canHavePendingTransactions ? "Supported" : "Not supported"}
               />
             </div>
-            <SyncDialogTriggerButton
-              accounts={[account]}
-              variant="outline"
-              disabled={props.syncDisabled}
-              onSync={props.onSync}
-            >
-              Sync {account.name || "unnamed Manager account"}
-            </SyncDialogTriggerButton>
+            {props.syncActions.accountSyncButton(account)}
           </div>
         </li>
       ))}

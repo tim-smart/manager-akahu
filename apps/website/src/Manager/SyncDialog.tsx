@@ -10,17 +10,24 @@ import {
   type ManagerAkahuSyncDialogState,
 } from "./SyncUi"
 
-export function SyncDialog(props: {
-  readonly children: ReactNode
+export type SyncControlActions = {
+  readonly syncAllButton: (accounts: ReadonlyArray<LinkedAccount>) => ReactNode
+  readonly accountSyncButton: (account: LinkedAccount) => ReactNode
+}
+
+export function SyncControls(props: {
+  readonly children: (actions: SyncControlActions) => ReactNode
   readonly state: ManagerAkahuSyncDialogState
+  readonly onOpen: (accounts: ReadonlyArray<LinkedAccount>) => void
   readonly onCancel: () => void
   readonly onStart: () => void
 }) {
-  const { children, onCancel, onStart, state } = props
+  const { children, onCancel, onOpen, onStart, state } = props
   const contentRef = useRef<HTMLDivElement>(null)
   const initialFocusRef = useRef<HTMLButtonElement>(null)
   const canClose = canCloseManagerAkahuSyncDialog(state)
   const isOpen = state._tag !== "closed"
+  const syncDisabled = state._tag === "running"
 
   useEffect(() => {
     if (!isOpen) return
@@ -37,7 +44,28 @@ export function SyncDialog(props: {
         }
       }}
     >
-      {children}
+      {children({
+        syncAllButton: (accounts) => (
+          <SyncDialogTriggerButton
+            accounts={accounts}
+            className="w-fit"
+            disabled={syncDisabled}
+            onSync={onOpen}
+          >
+            Sync all
+          </SyncDialogTriggerButton>
+        ),
+        accountSyncButton: (account) => (
+          <SyncDialogTriggerButton
+            accounts={[account]}
+            variant="outline"
+            disabled={syncDisabled}
+            onSync={onOpen}
+          >
+            Sync {account.name || "unnamed Manager account"}
+          </SyncDialogTriggerButton>
+        ),
+      })}
       {state._tag === "closed" ? null : (
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-background/80 backdrop-blur-sm" />
@@ -115,7 +143,7 @@ export function SyncDialog(props: {
   )
 }
 
-export function SyncDialogTriggerButton(props: {
+function SyncDialogTriggerButton(props: {
   readonly accounts: ReadonlyArray<LinkedAccount>
   readonly children: ReactNode
   readonly disabled: boolean
