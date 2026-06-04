@@ -98,6 +98,10 @@ The generated Manager API client includes endpoints and fields needed for this f
 - `packages/manager-api/src/ManagerBatchPagination.ts` now exposes receipt and payment batch read helpers for a selected Manager bank/cash account. The helpers call `GET/api4/receipt-batch` and `GET/api4/payment-batch` with `BankOrCashAccount`, `Skip`, and `PageSize`, then keep reading until Manager returns fewer items than the requested page size.
 - Focused manager-api tests cover multi-page receipt and payment reads, assert the requested `Skip`/`PageSize` sequence, and include an existing duplicate `fdxTransactionId` beyond the first page so later sync de-duplication can rely on complete Manager read sets.
 - Full `pnpm ready` validation was attempted for the Manager pagination helper change but currently stops during root lint because `apps/server/tests/Akahu.test.ts` cannot resolve `@app/domain/Akahu`; targeted `@app/manager-api` test, build, and check validation passes for this change.
+- Task 2 follow-up consolidated Manager receipt/payment paging through one private batch helper that owns `Skip`, `PageSize`, page item accumulation, and the fewer-than-page-size stop condition while preserving endpoint-specific public receipt/payment fetch functions.
+- `fetchManagerBankOrCashAccountSyncRead` is now the canonical Manager sync read helper for one bank/cash account. It fetches complete receipts and payments in parallel, then returns the separate arrays plus typed `existingFdxTransactionIdEntries` and an `existingFdxTransactionIdIndex` keyed by `fdxTransactionId` for later de-duplication.
+- Public Manager batch reads now require `pageSize`, when provided, to be a positive safe integer. Invalid values such as fractional, zero, negative, or non-finite numbers are rejected instead of silently truncating or clamping.
+- Focused manager-api tests now cover both receipt and payment paths through the shared pager, the canonical sync-read helper, duplicate `fdxTransactionId` entries beyond the first page for both resource types, strict `pageSize` rejection, and expected request sequences. `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass for this follow-up.
 
 ## Requirements
 
@@ -442,14 +446,14 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add tests or mocked coverage for multi-page Akahu and Manager responses. (completed)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass for the Akahu pagination portion. `pnpm --filter @app/manager-api test` covers the Manager pagination helper portion.
 
-### Task 2 follow-up: Consolidate Manager sync read pagination model
+### Task 2 follow-up: Consolidate Manager sync read pagination model (completed)
 
-- Refactor `ManagerBatchPagination.ts` so receipt and payment readers share one private Manager batch pagination helper. Keep the public API endpoint-specific, but avoid maintaining two copies of the same `Skip`/`PageSize`, item accumulation, and stop-condition loop as more Manager batch reads are added.
-- Add a canonical sync-read helper for a selected Manager bank/cash account that fetches complete receipt and payment pages together and returns the read model later sync code actually needs, such as separate receipt/payment arrays plus a typed existing `fdxTransactionId` index or discriminated existing-entry list. This keeps Task 5 from growing ad-hoc "fetch receipts, fetch payments, merge duplicate ids" orchestration inline.
-- Prefer running the independent receipt and payment reads in parallel inside that canonical helper, while preserving sequential page traversal within each endpoint.
-- Tighten the page-size contract while refactoring. Either keep `pageSize` as an internal/test option or require an explicit positive integer instead of silently normalizing arbitrary invalid numbers in the public input.
-- Update focused tests to cover the shared pager through both receipt and payment paths, the combined sync-read helper, duplicate `fdxTransactionId` values beyond the first page in both resource types, and the expected request sequences.
-- Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` if the repository-level Akahu test import issue has been fixed.
+- Refactor `ManagerBatchPagination.ts` so receipt and payment readers share one private Manager batch pagination helper. Keep the public API endpoint-specific, but avoid maintaining two copies of the same `Skip`/`PageSize`, item accumulation, and stop-condition loop as more Manager batch reads are added. (completed)
+- Add a canonical sync-read helper for a selected Manager bank/cash account that fetches complete receipt and payment pages together and returns the read model later sync code actually needs, such as separate receipt/payment arrays plus a typed existing `fdxTransactionId` index or discriminated existing-entry list. This keeps Task 5 from growing ad-hoc "fetch receipts, fetch payments, merge duplicate ids" orchestration inline. (completed)
+- Prefer running the independent receipt and payment reads in parallel inside that canonical helper, while preserving sequential page traversal within each endpoint. (completed)
+- Tighten the page-size contract while refactoring. Either keep `pageSize` as an internal/test option or require an explicit positive integer instead of silently normalizing arbitrary invalid numbers in the public input. (completed)
+- Update focused tests to cover the shared pager through both receipt and payment paths, the combined sync-read helper, duplicate `fdxTransactionId` values beyond the first page in both resource types, and the expected request sequences. (completed)
+- Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary
 
