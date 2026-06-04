@@ -480,6 +480,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - After boundary coverage exists, make `paginatedAkahuItems` private to `apps/server/src/Akahu.ts` unless another production module has a real need for it. Avoid exporting implementation details solely to test them. (completed)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, `pnpm --filter @app/domain build`, and `pnpm ready` pass.
 
+### Task 2 follow-up review: Simplify Akahu boundary test seams
+
+- Refactor the new Akahu/RPC dependency seams so they read as canonical open layers instead of test-driven partial exports. `ApiHandlersWithoutAkahu` exposes an awkward negative production concept only because the tests need to provide a mock `Akahu`; prefer a neutral base handler layer that requires `Akahu`, then compose the live `ApiHandlers` or `RpcRoute` with `Akahu.layer` at the application edge. Apply the same principle to `Akahu.layerWithHttpClient`: either make the HTTP-client-requiring layer the canonical service layer and provide Undici only at the live edge, or move any test-only composition helper out of the production API surface.
+- Compress the Akahu boundary test harness so each expected Akahu request exists in one structured representation. The current `requestKey` string grammar plus later structured request assertions duplicate the contract, only route on selected query fields, and will drift when settled older-history/date-window parameters are added. Prefer an ordered `{ expectedRequest, response }` table consumed by the mock HTTP client, asserting method/path/query/credential headers as each page is requested and returning that page's response.
+- Preserve the important coverage from the completed task: RPC-level `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` must still return all items across cursor pages; pending transaction pages must still assert `amount_as_number=true`; `paginatedAkahuItems` must remain private.
+- Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass.
+
 ### Task 3: Setup-state flow, atom, and minimal setup UI
 
 - Add extended LinkedAccount metadata including canHavePendingTransactions and currency.
