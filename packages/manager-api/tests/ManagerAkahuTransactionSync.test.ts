@@ -305,6 +305,40 @@ test("safely matches exactly one pending candidate to a settled transaction", ()
   expect(decision.entry.key).toBe("receipt-1")
 })
 
+test("excludes unavailable pending candidates from pending-to-settled matching", () => {
+  const excludedFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:12.34:coffee shop`
+  const syncRead = managerSyncRead({
+    receipts: [
+      pendingReceipt("receipt-excluded", {
+        fdxTransactionId: excludedFingerprint,
+        date: "2026-06-04",
+        amount: "12.34",
+        description: "Coffee Shop",
+      }),
+    ],
+  })
+
+  expect(
+    decidePendingToSettledMatch({
+      syncRead,
+      settledDate: akahuDate("2026-06-04"),
+      settledSignedAmount: "12.34",
+      settledDescription: "coffee shop",
+      excludedFdxTransactionIds: new Set([excludedFingerprint]),
+    }),
+  ).toEqual({ _tag: "none" })
+
+  expect(
+    decidePendingToSettledMatch({
+      syncRead,
+      settledDate: akahuDate("2026-06-04"),
+      settledSignedAmount: "12.34",
+      settledDescription: "coffee shop",
+      excludedFdxTransactionIds: new Set(["other-fingerprint"]),
+    })._tag,
+  ).toBe("match")
+})
+
 test("does not match pending-to-settled candidates outside safe checks", () => {
   const matchingReceipt = pendingReceipt("receipt-1", { date: "2026-06-04" })
   const syncRead = managerSyncRead({
