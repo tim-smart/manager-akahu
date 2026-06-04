@@ -870,6 +870,14 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add focused controller tests for both invariants: an old/stale start callback cannot launch a sync after the current state is no longer confirming, and a synchronous runner throw moves the running dialog to failed while clearing the in-flight guard so a later valid start is possible. (completed)
 - Validation: `pnpm test:website-sync-controller` and `pnpm --filter website build` pass. Website build reports Vite's existing large-chunk warning.
 
+### Task 7 controller start atomic follow-up review: Remove React updater side effects (pending)
+
+- Rework `startManagerAkahuSyncController` so it no longer communicates selected accounts out of a React functional state updater through a mutable local variable. The current implementation captures `accounts` inside `setState((current) => { ... })` and expects that updater to have run synchronously before deciding whether to launch the runner. React updater functions must be pure and may be deferred, replayed, or double-invoked; this makes the controller scheduling-dependent and can enqueue a `running` transition without launching the sync or setting the guard.
+- Prefer a controller-owned synchronous state boundary instead of preserving both an impure updater and `inFlightRef`. A cleaner shape is to keep a `stateRef` synchronized with React state through one local setter, derive the start decision from `stateRef.current`, update the ref/state to `running` synchronously, and launch the runner with the captured accounts. If a separate in-flight ref remains, the guard must be set in the same imperative controller transaction as the current-state decision, not after a React updater side effect. An equally acceptable reducer/command model may return `{ state, command }` from a pure transition and execute the command outside React.
+- Keep the synchronous throw recovery added by the completed task, but collapse the duplicated moving pieces where possible. With a controller-owned current-state ref, `running` can become the canonical current-tab guard and the extra boolean may be unnecessary; avoid replacing the updater side effect with another thin wrapper that still leaves state and guard ownership split.
+- Strengthen `apps/website/tests/ManagerAkahuSyncController.test.ts` so it does not only use a fake setter that executes functional updaters immediately. Add a deferred/asynchronous setter or actual hook/controller harness that proves start is atomic under React-like scheduling: starting must either transition to `running` and launch exactly one runner with the selected accounts, or do neither. It must never leave the dialog in `running` with no launched sync or a clear guard.
+- Validation: run `pnpm test:website-sync-controller` and `pnpm --filter website build`.
+
 ## Open questions
 
 None. Decisions made for this specification:
