@@ -4,11 +4,17 @@ import {
   AkahuTransactionDate,
   ConnectionId,
   Merchant,
+  PendingTransaction,
   Transaction,
   UserId,
 } from "@app/domain/Akahu"
 import { AkahuTokens, LinkedAccount } from "@app/domain/Manager/AkahuCustomFields"
-import type { ItemOfPayment, ItemOfReceipt } from "@app/manager-api/ManagerClient"
+import type {
+  ItemOfPayment,
+  ItemOfReceipt,
+  PutPayment,
+  PutReceipt,
+} from "@app/manager-api/ManagerClient"
 import type {
   ManagerSuspensePaymentPayload,
   ManagerSuspenseReceiptPayload,
@@ -45,6 +51,7 @@ const linkedAccount = (
     readonly key?: string | undefined
     readonly name?: string | undefined
     readonly currency?: string | null | undefined
+    readonly canHavePendingTransactions?: boolean | undefined
     readonly akahuAccount?: Account | undefined
   } = {},
 ) =>
@@ -52,7 +59,7 @@ const linkedAccount = (
     key: options.key ?? "manager-checking",
     name: options.name ?? "Manager Checking",
     currency: options.currency ?? null,
-    canHavePendingTransactions: false,
+    canHavePendingTransactions: options.canHavePendingTransactions ?? false,
     akahuAccount: options.akahuAccount ?? akahuAccount,
   })
 
@@ -73,6 +80,20 @@ const settledTransaction = (options: {
     amount: BigDecimal.fromStringUnsafe(options.amount),
     merchant:
       options.merchantName === undefined ? undefined : new Merchant({ name: options.merchantName }),
+  })
+
+const pendingTransaction = (options: {
+  readonly amount: string
+  readonly description?: string | undefined
+  readonly account?: Account | undefined
+}) =>
+  new PendingTransaction({
+    _account: options.account?._id ?? accountId,
+    _user: userId,
+    _connection: connectionId,
+    date: akahuDate("2026-06-05T00:30:00.000+13:00"),
+    description: options.description ?? "Pending description",
+    amount: BigDecimal.fromStringUnsafe(options.amount),
   })
 
 const receiptItem = (key: string, fdxTransactionId: string): ItemOfReceipt => ({
@@ -104,6 +125,20 @@ const makeMockClient = (
 ) => {
   const receiptPayloads: Array<ManagerSuspenseReceiptPayload> = []
   const paymentPayloads: Array<ManagerSuspensePaymentPayload> = []
+  const receiptPutPayloads: Array<PutReceipt> = []
+  const paymentPutPayloads: Array<PutPayment> = []
+  const receiptsByAccount: Record<string, Array<ItemOfReceipt>> = Object.fromEntries(
+    Object.entries(options.receiptsByAccount ?? {}).map(([account, receipts]) => [
+      account,
+      [...receipts],
+    ]),
+  )
+  const paymentsByAccount: Record<string, Array<ItemOfPayment>> = Object.fromEntries(
+    Object.entries(options.paymentsByAccount ?? {}).map(([account, payments]) => [
+      account,
+      [...payments],
+    ]),
+  )
   const client: ManagerAkahuSettledSyncManagerClient = {
     "GET/api4/receipt-batch": (params) => {
       const bankOrCashAccount = params?.BankOrCashAccount ?? ""
@@ -111,7 +146,7 @@ const makeMockClient = (
       return Effect.succeed({
         _links: null,
         _actions: null,
-        items: skip === 0 ? (options.receiptsByAccount?.[bankOrCashAccount] ?? []) : [],
+        items: skip === 0 ? (receiptsByAccount[bankOrCashAccount] ?? []) : [],
       })
     },
     "GET/api4/payment-batch": (params) => {
@@ -120,28 +155,76 @@ const makeMockClient = (
       return Effect.succeed({
         _links: null,
         _actions: null,
-        items: skip === 0 ? (options.paymentsByAccount?.[bankOrCashAccount] ?? []) : [],
+        items: skip === 0 ? (paymentsByAccount[bankOrCashAccount] ?? []) : [],
       })
     },
     "POST/api4/receipt": (payload) => {
       receiptPayloads.push(payload as ManagerSuspenseReceiptPayload)
+      const accountKey = payload.value?.receivedIn ?? ""
+      receiptsByAccount[accountKey] = [
+        ...(receiptsByAccount[accountKey] ?? []),
+        receiptItem(
+          `receipt-created-${receiptPayloads.length}`,
+          payload.value?.fdxTransactionId ?? "",
+        ),
+      ]
       return Effect.succeed(true)
     },
     "POST/api4/payment": (payload) => {
       paymentPayloads.push(payload as ManagerSuspensePaymentPayload)
+      const accountKey = payload.value?.paidFrom ?? ""
+      paymentsByAccount[accountKey] = [
+        ...(paymentsByAccount[accountKey] ?? []),
+        paymentItem(
+          `payment-created-${paymentPayloads.length}`,
+          payload.value?.fdxTransactionId ?? "",
+        ),
+      ]
+      return Effect.succeed(true)
+    },
+    "PUT/api4/receipt": (payload) => {
+      receiptPutPayloads.push(payload)
+      for (const receipts of Object.values(receiptsByAccount)) {
+        const index = receipts.findIndex((receipt) => receipt.key === payload.key)
+        if (index >= 0 && payload.value !== undefined) {
+          receipts[index] = { ...receipts[index]!, item: payload.value }
+        }
+      }
+      return Effect.succeed(true)
+    },
+    "PUT/api4/payment": (payload) => {
+      paymentPutPayloads.push(payload)
+      for (const payments of Object.values(paymentsByAccount)) {
+        const index = payments.findIndex((payment) => payment.key === payload.key)
+        if (index >= 0 && payload.value !== undefined) {
+          payments[index] = { ...payments[index]!, item: payload.value }
+        }
+      }
       return Effect.succeed(true)
     },
   }
 
-  return { client, receiptPayloads, paymentPayloads } as const
+  return {
+    client,
+    receiptPayloads,
+    paymentPayloads,
+    receiptPutPayloads,
+    paymentPutPayloads,
+  } as const
 }
 
 const runSettledSync = (options: {
   readonly accounts: ReadonlyArray<LinkedAccount>
   readonly client: ManagerAkahuSettledSyncManagerClient
   readonly transactionsByAccount?: Readonly<Record<string, ReadonlyArray<Transaction>>> | undefined
+  readonly pendingTransactionsByAccount?:
+    | Readonly<Record<string, ReadonlyArray<PendingTransaction>>>
+    | undefined
   readonly fetchSettledTransactions?:
     | ((request: { readonly accountId: AccountId }) => Stream.Stream<Transaction, unknown>)
+    | undefined
+  readonly fetchPendingTransactions?:
+    | ((request: { readonly accountId: AccountId }) => Stream.Stream<PendingTransaction, unknown>)
     | undefined
 }) =>
   syncManagerAkahuSettledTransactions({
@@ -151,6 +234,9 @@ const runSettledSync = (options: {
     fetchSettledTransactions: (request) =>
       options.fetchSettledTransactions?.(request) ??
       Stream.fromIterable(options.transactionsByAccount?.[request.accountId] ?? []),
+    fetchPendingTransactions: (request) =>
+      options.fetchPendingTransactions?.(request) ??
+      Stream.fromIterable(options.pendingTransactionsByAccount?.[request.accountId] ?? []),
   })
 
 it.effect(
@@ -444,6 +530,128 @@ it.effect("skips unsupported foreign-currency Manager accounts with warnings", (
       settledFetched: 1,
       unsupportedSkipped: 1,
       warnings: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("does not fetch pending Akahu transactions for accounts that do not support them", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount({ canHavePendingTransactions: false })
+    const { client } = makeMockClient()
+    const pendingAccountIds: Array<AccountId> = []
+
+    const summary = yield* runSettledSync({
+      accounts: [managerAccount],
+      client,
+      fetchPendingTransactions: (request) => {
+        pendingAccountIds.push(request.accountId)
+        return Stream.fromIterable([])
+      },
+    })
+
+    expect(pendingAccountIds).toEqual([])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 0,
+      pendingFetched: 0,
+      pendingCreated: 0,
+      pendingUpdated: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("creates new pending entries and updates exact pending fingerprint matches", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount({ canHavePendingTransactions: true })
+    const existingFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:3.21:existing coffee"
+    const newFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:2.50:pending coffee"
+    const { client, receiptPayloads, paymentPayloads, receiptPutPayloads } = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [receiptItem("receipt-existing-pending", existingFingerprint)],
+      },
+    })
+
+    const summary = yield* runSettledSync({
+      accounts: [managerAccount],
+      client,
+      transactionsByAccount: {
+        [accountId]: [settledTransaction({ id: "tx-settled-first", amount: "1.00" })],
+      },
+      pendingTransactionsByAccount: {
+        [accountId]: [
+          pendingTransaction({ amount: "3.21", description: "Existing Coffee" }),
+          pendingTransaction({ amount: "2.50", description: "Pending Coffee" }),
+        ],
+      },
+    })
+
+    expect(receiptPayloads.map((payload) => payload.value.fdxTransactionId)).toEqual([
+      "tx-settled-first",
+      newFingerprint,
+    ])
+    expect(paymentPayloads).toEqual([])
+    expect(receiptPutPayloads).toEqual([
+      {
+        key: "receipt-existing-pending",
+        value: {
+          date: "2026-06-05",
+          reference: existingFingerprint,
+          cleared: 1,
+          description: "Existing Coffee",
+          fdxTransactionId: existingFingerprint,
+          lines: [{ amount: "3.21", lineDescription: "Existing Coffee" }],
+          receivedIn: "manager-checking",
+        },
+      },
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      pendingFetched: 2,
+      receiptsCreated: 2,
+      paymentsCreated: 0,
+      pendingCreated: 1,
+      pendingUpdated: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("repeats pending sync without creating duplicate Manager entries", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount({ canHavePendingTransactions: true })
+    const { client, receiptPayloads, receiptPutPayloads } = makeMockClient()
+    const pendingTransactionsByAccount = {
+      [accountId]: [pendingTransaction({ amount: "4.00", description: "Repeat Coffee" })],
+    }
+
+    const firstSummary = yield* runSettledSync({
+      accounts: [managerAccount],
+      client,
+      pendingTransactionsByAccount,
+    })
+    const secondSummary = yield* runSettledSync({
+      accounts: [managerAccount],
+      client,
+      pendingTransactionsByAccount,
+    })
+
+    expect(receiptPayloads.map((payload) => payload.value.fdxTransactionId)).toEqual([
+      "akahu-pending:v1:akahu-checking:2026-06-05:4.00:repeat coffee",
+    ])
+    expect(receiptPutPayloads.map((payload) => payload.key)).toEqual(["receipt-created-1"])
+    expect(firstSummary.overall).toMatchObject({
+      pendingFetched: 1,
+      receiptsCreated: 1,
+      pendingCreated: 1,
+      pendingUpdated: 0,
+      errors: 0,
+    })
+    expect(secondSummary.overall).toMatchObject({
+      pendingFetched: 1,
+      receiptsCreated: 0,
+      pendingCreated: 0,
+      pendingUpdated: 1,
       errors: 0,
     })
   }),

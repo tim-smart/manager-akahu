@@ -1,10 +1,12 @@
 import { ApiClient } from "@/ApiClient"
 import { Manager } from "@/Manager"
 import type { AkahuTokens, LinkedAccount } from "@app/domain/Manager/AkahuCustomFields"
-import type { AccountId, Transaction } from "@app/domain/Akahu"
+import type { AccountId, PendingTransaction, Transaction } from "@app/domain/Akahu"
 import {
   addManagerAkahuSyncSummaryCounts,
+  buildAkahuPendingTransactionFingerprint,
   classifyManagerAkahuSuspenseImport,
+  decidePendingExactFingerprint,
   decideSettledDuplicateByAkahuTransactionId,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
@@ -22,9 +24,15 @@ import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { AkahuTokens as AkahuTokensSchema } from "@app/domain/Manager/AkahuCustomFields"
 
 export type ManagerAkahuSettledSyncManagerClient = ManagerBankOrCashAccountSyncReadClient &
-  Pick<Client, "POST/api4/receipt" | "POST/api4/payment">
+  Pick<Client, "POST/api4/receipt" | "POST/api4/payment" | "PUT/api4/receipt" | "PUT/api4/payment">
 
 export interface ManagerAkahuSettledTransactionRequest {
+  readonly akahuAppToken: AkahuTokens["akahuAppToken"]
+  readonly akahuUserToken: AkahuTokens["akahuUserToken"]
+  readonly accountId: AccountId
+}
+
+export interface ManagerAkahuPendingTransactionRequest {
   readonly akahuAppToken: AkahuTokens["akahuAppToken"]
   readonly akahuUserToken: AkahuTokens["akahuUserToken"]
   readonly accountId: AccountId
@@ -40,6 +48,9 @@ export interface SyncManagerAkahuSettledTransactionsInput extends ManagerAkahuSe
   readonly fetchSettledTransactions: (
     request: ManagerAkahuSettledTransactionRequest,
   ) => Stream.Stream<Transaction, unknown>
+  readonly fetchPendingTransactions: (
+    request: ManagerAkahuPendingTransactionRequest,
+  ) => Stream.Stream<PendingTransaction, unknown>
 }
 
 export interface ManagerAkahuSettledSyncAccountSummary {
@@ -129,6 +140,7 @@ export class ManagerSyncFlows extends Context.Service<
             client,
             tokens: tokensResult.tokens,
             fetchSettledTransactions: (request) => api("AccountTransactions", request),
+            fetchPendingTransactions: (request) => api("AccountPendingTransactions", request),
           })
         },
       )
@@ -173,6 +185,7 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
     importabilityDecision: getManagerBankAccountCurrencyImportDecision(account),
   }
   let processorState = initialManagerAkahuSettledAccountProcessorState()
+  let settledStreamFailed = false
 
   yield* input
     .fetchSettledTransactions({
@@ -194,6 +207,7 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
       ),
       Stream.runDrain,
       Effect.catch((error) => {
+        settledStreamFailed = true
         processorState = addManagerAkahuSettledAccountProcessorError(
           processorState,
           formatSyncError(error),
@@ -201,6 +215,33 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
         return Effect.void
       }),
     )
+
+  if (!settledStreamFailed && account.canHavePendingTransactions) {
+    yield* input
+      .fetchPendingTransactions({
+        akahuAppToken: input.tokens.akahuAppToken,
+        akahuUserToken: input.tokens.akahuUserToken,
+        accountId: account.akahuAccount._id,
+      })
+      .pipe(
+        Stream.runForEach((transaction) =>
+          Effect.gen(function* () {
+            processorState = yield* processManagerAkahuPendingTransaction({
+              processor,
+              state: processorState,
+              transaction,
+            })
+          }),
+        ),
+        Effect.catch((error) => {
+          processorState = addManagerAkahuSettledAccountProcessorError(
+            processorState,
+            formatSyncError(error),
+          )
+          return Effect.void
+        }),
+      )
+  }
 
   return buildManagerAkahuSettledSyncAccountSummaryFromProcessorState(account, processorState)
 })
@@ -298,6 +339,160 @@ const createManagerAkahuSettledTransaction = Effect.fn("createManagerAkahuSettle
     )
     state = incrementManagerAkahuSettledAccountProcessorCount(state, write.createdCount)
     return continueManagerAkahuSettledAccountProcessor(state)
+  },
+)
+
+const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPendingTransaction")(
+  function* (input: {
+    readonly processor: ManagerAkahuSettledAccountProcessorInput
+    readonly state: ManagerAkahuSettledAccountProcessorState
+    readonly transaction: PendingTransaction
+  }) {
+    const { account, client, importabilityDecision, syncRead } = input.processor
+    const transaction = input.transaction
+    const description = transaction.description
+    let state = incrementManagerAkahuSettledAccountProcessorCount(input.state, "pendingFetched")
+
+    const fingerprintDecision = buildAkahuPendingTransactionFingerprint({
+      akahuAccountId: account.akahuAccount._id,
+      date: transaction.date,
+      amount: transaction.amount,
+      description,
+    })
+
+    if (fingerprintDecision._tag === "unsupported") {
+      state = addManagerAkahuSettledAccountProcessorWarning(state, fingerprintDecision.warning)
+      state = incrementManagerAkahuSettledAccountProcessorCount(state, "unsupportedSkipped")
+      return incrementManagerAkahuSettledAccountProcessorCount(state, "warnings")
+    }
+
+    if (state.createdFdxTransactionIds.has(fingerprintDecision.fingerprint)) {
+      return incrementManagerAkahuSettledAccountProcessorCount(state, "duplicatesSkipped")
+    }
+
+    const exactFingerprintDecision = decidePendingExactFingerprint(
+      syncRead,
+      fingerprintDecision.fingerprint,
+    )
+
+    if (exactFingerprintDecision._tag === "ambiguous") {
+      state = addManagerAkahuSettledAccountProcessorWarning(state, exactFingerprintDecision.warning)
+      state = incrementManagerAkahuSettledAccountProcessorCount(state, "duplicatesSkipped")
+      return incrementManagerAkahuSettledAccountProcessorCount(state, "warnings")
+    }
+
+    const classification = classifyManagerAkahuSuspenseImport({
+      bankOrCashAccountKey: account.key,
+      date: transaction.date,
+      signedAmount: transaction.amount,
+      reference: fingerprintDecision.fingerprint,
+      description,
+      fdxTransactionId: fingerprintDecision.fingerprint,
+      clearance: { _tag: "pending" },
+      importabilityDecision,
+    })
+
+    switch (classification._tag) {
+      case "receipt":
+      case "payment":
+        return exactFingerprintDecision._tag === "create"
+          ? yield* createManagerAkahuPendingTransaction({
+              state,
+              client,
+              fingerprint: fingerprintDecision.fingerprint,
+              classification,
+            })
+          : yield* updateManagerAkahuPendingTransaction({
+              state,
+              client,
+              classification,
+              entry: exactFingerprintDecision.entry,
+            })
+      case "zero":
+        return incrementManagerAkahuSettledAccountProcessorCount(state, "zeroAmountSkipped")
+      case "unsupported":
+        state = addManagerAkahuSettledAccountProcessorWarning(state, classification.warning)
+        state = incrementManagerAkahuSettledAccountProcessorCount(state, "unsupportedSkipped")
+        return incrementManagerAkahuSettledAccountProcessorCount(state, "warnings")
+    }
+  },
+)
+
+const createManagerAkahuPendingTransaction = Effect.fn("createManagerAkahuPendingTransaction")(
+  function* (input: {
+    readonly state: ManagerAkahuSettledAccountProcessorState
+    readonly client: ManagerAkahuSettledSyncManagerClient
+    readonly fingerprint: string
+    readonly classification: ManagerAkahuSettledCreateClassification
+  }) {
+    const write =
+      input.classification._tag === "receipt"
+        ? {
+            createdCount: "receiptsCreated" as const,
+            effect: input.client["POST/api4/receipt"](input.classification.managerDecision.payload),
+          }
+        : {
+            createdCount: "paymentsCreated" as const,
+            effect: input.client["POST/api4/payment"](input.classification.managerDecision.payload),
+          }
+
+    const writeResult = yield* write.effect.pipe(
+      Effect.as({ _tag: "created" as const }),
+      Effect.catch((error) =>
+        Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+      ),
+    )
+
+    if (writeResult._tag === "error") {
+      return addManagerAkahuSettledAccountProcessorError(input.state, writeResult.error)
+    }
+
+    let state = addManagerAkahuSettledAccountProcessorCreatedFdxTransactionId(
+      input.state,
+      input.fingerprint,
+    )
+    state = incrementManagerAkahuSettledAccountProcessorCount(state, write.createdCount)
+    return incrementManagerAkahuSettledAccountProcessorCount(state, "pendingCreated")
+  },
+)
+
+const updateManagerAkahuPendingTransaction = Effect.fn("updateManagerAkahuPendingTransaction")(
+  function* (input: {
+    readonly state: ManagerAkahuSettledAccountProcessorState
+    readonly client: ManagerAkahuSettledSyncManagerClient
+    readonly classification: ManagerAkahuSettledCreateClassification
+    readonly entry: ManagerBankOrCashAccountSyncRead["existingFdxTransactionIdEntries"][number]
+  }) {
+    if (input.classification._tag !== input.entry._tag) {
+      let state = addManagerAkahuSettledAccountProcessorWarning(
+        input.state,
+        `Existing pending Manager entry ${input.entry.key} has a different transaction type than its fingerprint.`,
+      )
+      state = incrementManagerAkahuSettledAccountProcessorCount(state, "duplicatesSkipped")
+      return incrementManagerAkahuSettledAccountProcessorCount(state, "warnings")
+    }
+
+    const write =
+      input.classification._tag === "receipt"
+        ? input.client["PUT/api4/receipt"]({
+            key: input.entry.key,
+            value: input.classification.managerDecision.payload.value,
+          })
+        : input.client["PUT/api4/payment"]({
+            key: input.entry.key,
+            value: input.classification.managerDecision.payload.value,
+          })
+
+    const writeResult = yield* write.pipe(
+      Effect.as({ _tag: "updated" as const }),
+      Effect.catch((error) =>
+        Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+      ),
+    )
+
+    return writeResult._tag === "error"
+      ? addManagerAkahuSettledAccountProcessorError(input.state, writeResult.error)
+      : incrementManagerAkahuSettledAccountProcessorCount(input.state, "pendingUpdated")
   },
 )
 

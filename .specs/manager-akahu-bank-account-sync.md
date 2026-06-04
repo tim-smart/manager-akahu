@@ -159,6 +159,16 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 5 settled-stream runtime-workaround audit removed the dependency on inverted `Stream.runForEachWhile` truthiness and singleton `Stream.rechunk(1)` behavior. Settled sync now feeds transactions through `Stream.takeUntilEffect(...).pipe(Stream.runDrain)`, with the account processor returning `{ state, shouldStop }` after each state transition.
 - Receipt and payment Manager create paths in settled sync now share one write helper that selects the POST endpoint, carries the payload, maps the created summary count, records write errors, and tracks created `fdxTransactionId` values after successful writes.
 
+### Task 6 pending-sync service findings
+
+- `apps/website/src/Manager/SyncFlows.ts` now runs a pending transaction phase after the settled transaction stream for each linked account, preserving settled-before-pending processing within the account.
+- Pending Akahu transactions are fetched only when `LinkedAccount.canHavePendingTransactions` is true. Accounts without Manager pending support skip the pending endpoint entirely.
+- Pending sync uses the existing pure `buildAkahuPendingTransactionFingerprint`, `decidePendingExactFingerprint`, and suspense import classification helpers. New pending fingerprints create Manager receipts/payments with pending clearance, while exact single fingerprint matches update the existing Manager receipt/payment by key through `PUT/api4/receipt` or `PUT/api4/payment`.
+- Pending creates are tracked in the account processor state so duplicate pending fingerprints within the same run do not create duplicate Manager entries. Mocked repeat-sync coverage also verifies that a second sync re-reads the first run's created Manager entry and updates it instead of posting another entry.
+- Ambiguous exact pending fingerprint matches are skipped with a warning and `duplicatesSkipped` count rather than creating another Manager entry.
+- Mocked website sync-flow tests now cover unsupported pending accounts without pending endpoint calls, pending create/update, settled-before-pending write order through receipt payload order, and repeat pending sync without duplicate POSTs.
+- Safe pending-to-settled replacement and stale pending detection remain unimplemented follow-ups from the broader Task 6 specification; this increment covered the requested pending endpoint gating and exact-fingerprint create/update/idempotency path.
+
 ## Requirements
 
 ### Setup-state UI
@@ -734,16 +744,16 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the shared settled Manager write helper as the single place that selects receipt/payment POST endpoints, maps created-count updates, handles write errors, and records created `fdxTransactionId` values. Do not reintroduce duplicated receipt/payment write branches, inverted `Stream.runForEachWhile` truthiness, singleton `Stream.rechunk(1)` dependencies, or unused stop-reason fields unless those fields are surfaced in summaries, logging, or UI state. (completed)
 - Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passing.
 
-### Task 6: Pending-transaction sync service extension with mocked tests
+### Task 6: Pending-transaction sync service extension with mocked tests (partially completed)
 
-- Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true.
-- Process settled transactions before pending transactions.
-- Use fingerprint matching for pending create/update.
-- Implement safe pending-to-settled replacement when exactly one safe candidate exists.
-- Leave unsafe/ambiguous opposite-kind or multi-candidate cases unchanged and report warnings.
-- Preserve user-editable fields when updating Akahu-created pending entries where safe.
-- Add mocked tests for unsupported pending accounts, pending create/update, repeat pending sync without duplicates, stale pending detection, and safe pending-to-settled replacement.
-- Validation: website build/typecheck and mocked pending-sync tests pass.
+- Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true. (completed)
+- Process settled transactions before pending transactions. (completed)
+- Use fingerprint matching for pending create/update. (completed for exact fingerprint create/update)
+- Implement safe pending-to-settled replacement when exactly one safe candidate exists. (not completed)
+- Leave unsafe/ambiguous opposite-kind or multi-candidate cases unchanged and report warnings. (completed for ambiguous exact pending fingerprint matches; not completed for pending-to-settled replacement cases)
+- Preserve user-editable fields when updating Akahu-created pending entries where safe. (not completed; exact pending updates use the canonical suspense payload fields)
+- Add mocked tests for unsupported pending accounts, pending create/update, repeat pending sync without duplicates, stale pending detection, and safe pending-to-settled replacement. (completed for unsupported pending accounts, pending create/update, and repeat pending sync without duplicates; stale pending detection and safe pending-to-settled replacement tests are not completed)
+- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass.
 
 ### Task 7: Sync atoms, linked-account sync UI, and confirmation/progress modal
 
