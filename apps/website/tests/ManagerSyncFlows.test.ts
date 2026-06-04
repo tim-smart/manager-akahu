@@ -866,28 +866,58 @@ it.effect("does not repeat an exact pending update for duplicate pending rows", 
 )
 
 it.effect(
-  "replaces exactly one safe pending receipt or payment with a settled Manager update",
+  "replaces exactly one safe pending receipt or payment with canonical settled updates",
   () =>
     Effect.gen(function* () {
       const managerAccount = linkedAccount()
+      const existingReceipt = pendingReceiptItem("receipt-existing-pending", {
+        date: "2026-06-03",
+        amount: "12.340",
+        description: "Coffee  Shop",
+      })
+      const existingPayment = pendingPaymentItem("payment-existing-pending", {
+        date: "2026-06-06",
+        amount: "7.890",
+        description: "Book  Store",
+      })
       const { client, receiptPayloads, paymentPayloads, receiptPutPayloads, paymentPutPayloads } =
         makeMockClient({
           receiptsByAccount: {
             "manager-checking": [
-              pendingReceiptItem("receipt-existing-pending", {
-                date: "2026-06-03",
-                amount: "12.340",
-                description: "Coffee  Shop",
-              }),
+              {
+                ...existingReceipt,
+                item: {
+                  ...existingReceipt.item,
+                  bankClearDate: "2026-06-06",
+                  customFields: { userEdited: true },
+                  lines: [
+                    {
+                      account: "manually-categorized-account",
+                      amount: "12.340",
+                      lineDescription: "Manual receipt category",
+                    },
+                  ],
+                },
+              },
             ],
           },
           paymentsByAccount: {
             "manager-checking": [
-              pendingPaymentItem("payment-existing-pending", {
-                date: "2026-06-06",
-                amount: "7.890",
-                description: "Book  Store",
-              }),
+              {
+                ...existingPayment,
+                item: {
+                  ...existingPayment.item,
+                  bankClearDate: "2026-06-06",
+                  customFields: { userEdited: true },
+                  lines: [
+                    {
+                      account: "manually-categorized-account",
+                      amount: "7.890",
+                      lineDescription: "Manual payment category",
+                    },
+                  ],
+                },
+              },
             ],
           },
         })

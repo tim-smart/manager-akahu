@@ -19,8 +19,12 @@ import {
   type ManagerBankOrCashAccountSyncRead,
   type ManagerBankOrCashAccountSyncReadClient,
 } from "@app/manager-api/ManagerBatchPagination"
-import { getManagerBankAccountCurrencyImportDecision } from "@app/manager-api/ManagerCompatibility"
-import type { Client, PutPayment, PutReceipt } from "@app/manager-api/ManagerClient"
+import {
+  getManagerBankAccountCurrencyImportDecision,
+  type ManagerSuspensePaymentValue,
+  type ManagerSuspenseReceiptValue,
+} from "@app/manager-api/ManagerCompatibility"
+import type { Client } from "@app/manager-api/ManagerClient"
 import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { AkahuTokens as AkahuTokensSchema } from "@app/domain/Manager/AkahuCustomFields"
 
@@ -97,9 +101,15 @@ type ManagerAkahuTransactionCreateClassification = Extract<
   { readonly _tag: "receipt" | "payment" }
 >
 
-type ManagerAkahuExactPendingFingerprintUpdate =
-  | { readonly _tag: "receipt"; readonly payload: PutReceipt }
-  | { readonly _tag: "payment"; readonly payload: PutPayment }
+interface ManagerAkahuReceiptUpdatePayload {
+  readonly key: string
+  readonly value: ManagerSuspenseReceiptValue
+}
+
+interface ManagerAkahuPaymentUpdatePayload {
+  readonly key: string
+  readonly value: ManagerSuspensePaymentValue
+}
 
 interface ManagerAkahuTransactionSyncAccountContext {
   readonly account: LinkedAccount
@@ -552,23 +562,11 @@ const updateManagerAkahuSettledPendingReplacement = Effect.fn(
     return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
   }
 
-  const write =
-    input.classification._tag === "receipt"
-      ? input.client["PUT/api4/receipt"]({
-          key: input.entry.key,
-          value: input.classification.managerDecision.payload.value,
-        })
-      : input.client["PUT/api4/payment"]({
-          key: input.entry.key,
-          value: input.classification.managerDecision.payload.value,
-        })
-
-  const writeResult = yield* write.pipe(
-    Effect.as({ _tag: "updated" as const }),
-    Effect.catch((error) =>
-      Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-    ),
-  )
+  const writeResult = yield* putManagerAkahuClassifiedUpdate({
+    client: input.client,
+    key: input.entry.key,
+    classification: input.classification,
+  })
 
   if (writeResult._tag === "error") {
     return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
@@ -602,21 +600,11 @@ const updateManagerAkahuPendingTransaction = Effect.fn("updateManagerAkahuPendin
       return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
     }
 
-    const update = buildManagerAkahuExactPendingFingerprintUpdate({
+    const writeResult = yield* putManagerAkahuClassifiedUpdate({
+      client: input.client,
+      key: input.entry.key,
       classification: input.classification,
-      entry: input.entry,
     })
-    const write =
-      update._tag === "receipt"
-        ? input.client["PUT/api4/receipt"](update.payload)
-        : input.client["PUT/api4/payment"](update.payload)
-
-    const writeResult = yield* write.pipe(
-      Effect.as({ _tag: "updated" as const }),
-      Effect.catch((error) =>
-        Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-      ),
-    )
 
     if (writeResult._tag === "error") {
       return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
@@ -630,30 +618,33 @@ const updateManagerAkahuPendingTransaction = Effect.fn("updateManagerAkahuPendin
   },
 )
 
-const buildManagerAkahuExactPendingFingerprintUpdate = (input: {
-  readonly classification: ManagerAkahuTransactionCreateClassification
-  readonly entry: ManagerBankOrCashAccountSyncRead["existingFdxTransactionIdEntries"][number]
-}): ManagerAkahuExactPendingFingerprintUpdate => {
-  // Exact pending-fingerprint updates intentionally replace the entry with the
-  // canonical Akahu suspense payload until a safe field-preservation policy is verified.
-  if (input.classification._tag === "receipt") {
-    return {
-      _tag: "receipt",
-      payload: {
-        key: input.entry.key,
-        value: input.classification.managerDecision.payload.value,
-      },
-    }
-  }
+const putManagerAkahuClassifiedUpdate = Effect.fn("putManagerAkahuClassifiedUpdate")(
+  function* (input: {
+    readonly client: ManagerAkahuTransactionSyncManagerClient
+    readonly key: string
+    readonly classification: ManagerAkahuTransactionCreateClassification
+  }) {
+    // Updates intentionally replace the entry with the canonical Akahu suspense
+    // payload until a safe field-preservation policy is verified.
+    const write =
+      input.classification._tag === "receipt"
+        ? input.client["PUT/api4/receipt"]({
+            key: input.key,
+            value: input.classification.managerDecision.payload.value,
+          } satisfies ManagerAkahuReceiptUpdatePayload)
+        : input.client["PUT/api4/payment"]({
+            key: input.key,
+            value: input.classification.managerDecision.payload.value,
+          } satisfies ManagerAkahuPaymentUpdatePayload)
 
-  return {
-    _tag: "payment",
-    payload: {
-      key: input.entry.key,
-      value: input.classification.managerDecision.payload.value,
-    },
-  }
-}
+    return yield* write.pipe(
+      Effect.as({ _tag: "updated" as const }),
+      Effect.catch((error) =>
+        Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+      ),
+    )
+  },
+)
 
 const initialManagerAkahuTransactionSyncAccountState =
   (): ManagerAkahuTransactionSyncAccountState => ({
