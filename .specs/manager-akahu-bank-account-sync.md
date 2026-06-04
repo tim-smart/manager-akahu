@@ -107,6 +107,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - `paginatedAkahuItems` is now private to `apps/server/src/Akahu.ts`; tests no longer import the helper. `Akahu.layerWithHttpClient` provides the same service implementation with injectable transport for tests, while `Akahu.layer` remains the live Node/Undici layer.
 - No settled older-history/date-window RPC boundary was added in this task. The settled transaction boundary remains the existing account transaction request with cursor pagination only, so future five-overlap sync work still needs to add or verify the older-history fetch mechanism.
 - Task 2 Manager sync-read input boundary follow-up added a local no-emit type guard in `ManagerBatchPagination.test.ts` so `ManagerBankOrCashAccountBatchReadInput` fails test/build typechecking if a public `pageSize` key is reintroduced. The guard remains confined to pagination tests and does not add runtime page-size configuration.
+- Task 2 Manager page-size guard follow-up made the pagination test guard direct: `publicSyncReadInput` now satisfies the real `ManagerBankOrCashAccountBatchReadInput` contract, while a separate source-local no-emit assertion fails typechecking if `"pageSize"` becomes a public input key.
 
 ## Requirements
 
@@ -481,11 +482,11 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Keep the guard boring and local to the pagination tests. Do not reintroduce runtime page-size configuration or a test-only production knob. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
-### Task 2 follow-up review follow-up audit follow-up: Make Manager page-size type guard direct
+### Task 2 follow-up review follow-up audit follow-up: Make Manager page-size type guard direct (completed)
 
-- Replace `ManagerBankOrCashAccountBatchReadInputWithoutPageSize` with a direct no-emit assertion that states the actual boundary being protected, such as a local `type ManagerBatchReadInputHasNoPublicPageSize = "pageSize" extends keyof ManagerBankOrCashAccountBatchReadInput ? never : true` plus a `const` assignment, or an equally explicit exact-key assertion.
-- Keep `publicSyncReadInput` typed with the real `ManagerBankOrCashAccountBatchReadInput` contract. The current wrapper type behaves correctly, but it creates a second pseudo input type whose name reads like a transformed production shape instead of a focused regression guard; future readers should not have to inspect a conditional alias to understand that only the public `pageSize` key is being rejected.
-- Keep the guard local to `packages/manager-api/tests/ManagerBatchPagination.test.ts`, with no runtime page-size configuration and no test-only production knob.
+- Replace `ManagerBankOrCashAccountBatchReadInputWithoutPageSize` with a direct no-emit assertion that states the actual boundary being protected, such as a local `type ManagerBatchReadInputHasNoPublicPageSize = "pageSize" extends keyof ManagerBankOrCashAccountBatchReadInput ? never : true` plus a `const` assignment, or an equally explicit exact-key assertion. (completed)
+- Keep `publicSyncReadInput` typed with the real `ManagerBankOrCashAccountBatchReadInput` contract. The current wrapper type behaves correctly, but it creates a second pseudo input type whose name reads like a transformed production shape instead of a focused regression guard; future readers should not have to inspect a conditional alias to understand that only the public `pageSize` key is being rejected. (completed)
+- Keep the guard local to `packages/manager-api/tests/ManagerBatchPagination.test.ts`, with no runtime page-size configuration and no test-only production knob. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary (completed)
