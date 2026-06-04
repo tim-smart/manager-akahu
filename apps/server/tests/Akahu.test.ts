@@ -219,7 +219,7 @@ it.effect("AccountTransactions fails RPC decoding for malformed Akahu transactio
       [
         {
           request: expectedAkahuRequest({ pathname: "/v1/accounts/acc_1/transactions" }),
-          response: page([settledTransaction("txn-bad-date", "acc_1", "2026-02-31T00:00:00.000Z")]),
+          response: page([settledTransaction("txn-bad-date", "acc_1", "2026-13-01T00:00:00.000Z")]),
         },
       ],
       (client) =>
@@ -304,7 +304,9 @@ it.effect(
               pathname: "/v1/accounts/acc_1/transactions/pending",
               query: { amount_as_number: "true" },
             }),
-            response: page([pendingTransaction("pending-bad-date", "acc_1", "not-a-date")]),
+            response: page([
+              pendingTransaction("pending-bad-date", "acc_1", "2026-02-29T00:00:00.000Z"),
+            ]),
           },
         ],
         (client) =>

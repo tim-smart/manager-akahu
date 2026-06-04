@@ -1,5 +1,6 @@
 import { BigDecimal, Option } from "effect"
-import type { AkahuTransactionDate } from "@app/domain/Akahu"
+import { getAkahuTransactionCalendarDate, type AkahuTransactionDate } from "@app/domain/Akahu"
+import { parseCalendarDate, type CalendarDateParts } from "@app/domain/CalendarDate"
 import {
   buildManagerSuspenseImportDecision,
   type ManagerBankAccountCurrencyImportDecision,
@@ -162,15 +163,8 @@ export const addManagerAkahuSyncSummaryCounts = (
   return next
 }
 
-export const formatManagerAkahuDate = (date: AkahuTransactionDate): string => {
-  const match = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/.exec(date)
-  const calendarDate = match?.[1]
-  if (calendarDate !== undefined) {
-    return calendarDate
-  }
-
-  throw new Error(`Akahu transaction date must start with yyyy-mm-dd: ${date}`)
-}
+export const formatManagerAkahuDate = (date: AkahuTransactionDate): string =>
+  getAkahuTransactionCalendarDate(date)
 
 const toBigDecimal = (
   amount: ManagerAkahuDecimalInput,
@@ -332,38 +326,13 @@ const getEntryBankOrCashAccountKey = (
 ): string | null | undefined =>
   entry._tag === "receipt" ? entry.receipt.item.receivedIn : entry.payment.item.paidFrom
 
-const calendarDateParts = /^(\d{4})-(\d{2})-(\d{2})$/
-
-const isLeapYear = (year: number): boolean =>
-  year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-
-const isValidCalendarDate = (year: number, month: number, day: number): boolean => {
-  if (month < 1 || month > 12) {
-    return false
-  }
-
-  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  return day >= 1 && day <= daysInMonth[month - 1]
-}
-
-const calendarDayNumber = (year: number, month: number, day: number): number => {
-  return Date.UTC(year, month - 1, day) / 86_400_000
+const calendarDayNumber = (date: CalendarDateParts): number => {
+  return Date.UTC(date.year, date.month - 1, date.day) / 86_400_000
 }
 
 const parseManagerCalendarDayNumber = (date: string): number | undefined => {
-  const match = calendarDateParts.exec(date)
-  if (match === null) {
-    return undefined
-  }
-
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-  if (!isValidCalendarDate(year, month, day)) {
-    return undefined
-  }
-
-  return calendarDayNumber(year, month, day)
+  const calendarDate = parseCalendarDate(date)
+  return calendarDate === undefined ? undefined : calendarDayNumber(calendarDate)
 }
 
 const getSignedAmountKind = (amount: ManagerLineAmount): ManagerAkahuTransactionKind | "zero" => {

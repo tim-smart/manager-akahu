@@ -1,4 +1,4 @@
-import { AkahuTransactionDate } from "@app/domain/Akahu"
+import { AkahuTransactionDate, getAkahuTransactionCalendarDate } from "@app/domain/Akahu"
 import { BigDecimal, Schema } from "effect"
 import { expect, test } from "@effect/vitest"
 import type { ManagerPaymentItem, ManagerReceiptItem } from "../src/index.ts"
@@ -90,9 +90,18 @@ const pendingPayment = (
   })
 
 test("formats Manager dates by preserving Akahu string calendar dates", () => {
-  expect(formatManagerAkahuDate(akahuDate("2026-06-05T00:30:00.000+13:00"))).toBe("2026-06-05")
+  const offsetDate = akahuDate("2026-06-05T00:30:00.000+13:00")
+  expect(offsetDate).toBe("2026-06-05T00:30:00.000+13:00")
+  expect(getAkahuTransactionCalendarDate(offsetDate)).toBe("2026-06-05")
+  expect(formatManagerAkahuDate(offsetDate)).toBe("2026-06-05")
   expect(formatManagerAkahuDate(akahuDate("2026-06-04T23:30:00.000-10:00"))).toBe("2026-06-04")
   expect(formatManagerAkahuDate(akahuDate("2026-06-05"))).toBe("2026-06-05")
+})
+
+test("rejects Akahu transaction dates with invalid calendar components", () => {
+  expect(() => akahuDate("2026-02-29T00:00:00.000Z")).toThrow()
+  expect(() => akahuDate("2024-02-30T00:00:00.000Z")).toThrow()
+  expect(() => akahuDate("2026-13-01T00:00:00.000Z")).toThrow()
 })
 
 test("normalizes decimal amounts to stable two-decimal strings without number inputs", () => {
@@ -311,6 +320,28 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
         receipts: [pendingReceipt("receipt-invalid-date", { date: "2026-02-31" })],
       }),
       settledDate: akahuDate("2026-03-01"),
+      settledSignedAmount: "12.34",
+      settledDescription: "coffee shop",
+    }),
+  ).toEqual({ _tag: "none" })
+
+  expect(
+    decidePendingToSettledMatch({
+      syncRead: managerSyncRead({
+        receipts: [pendingReceipt("receipt-non-exact-date", { date: "2026-06-04T00:00:00.000Z" })],
+      }),
+      settledDate: akahuDate("2026-06-04"),
+      settledSignedAmount: "12.34",
+      settledDescription: "coffee shop",
+    }),
+  ).toEqual({ _tag: "none" })
+
+  expect(
+    decidePendingToSettledMatch({
+      syncRead: managerSyncRead({
+        receipts: [pendingReceipt("receipt-invalid-month", { date: "2026-13-01" })],
+      }),
+      settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
     }),

@@ -1,5 +1,6 @@
 import { type Brand, DateTime, Schema, SchemaGetter } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
+import { parseCalendarDate } from "./CalendarDate.ts"
 import { BigDecimalFromNumber } from "./shared.ts"
 
 export class Merchant extends Schema.Class<Merchant>("akahu/Merchant")({
@@ -22,18 +23,16 @@ export type AccountId = typeof AccountId.Type
 export const UserId = Schema.String.pipe(Schema.brand("akahu/UserId"))
 export type UserId = typeof UserId.Type
 
-const leadingCalendarDate = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/
+const leadingCalendarDate = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/
 
-const isLeapYear = (year: number): boolean =>
-  year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-
-const isValidCalendarDate = (year: number, month: number, day: number): boolean => {
-  if (month < 1 || month > 12) {
-    return false
+const getLeadingAkahuCalendarDate = (value: string): string | undefined => {
+  const match = leadingCalendarDate.exec(value)
+  const calendarDate = match?.[1]
+  if (calendarDate === undefined) {
+    return undefined
   }
 
-  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  return day >= 1 && day <= daysInMonth[month - 1]
+  return parseCalendarDate(calendarDate)?.date
 }
 
 export const AkahuTransactionDate: Schema.refine<
@@ -42,12 +41,7 @@ export const AkahuTransactionDate: Schema.refine<
 > = Schema.String.pipe(
   Schema.refine(
     (value): value is string & Brand.Brand<"akahu/TransactionDate"> => {
-      const match = leadingCalendarDate.exec(value)
-      if (match === null) {
-        return false
-      }
-
-      return isValidCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]))
+      return getLeadingAkahuCalendarDate(value) !== undefined
     },
     {
       identifier: "akahu/TransactionDate",
@@ -56,6 +50,15 @@ export const AkahuTransactionDate: Schema.refine<
   ),
 )
 export type AkahuTransactionDate = typeof AkahuTransactionDate.Type
+
+export const getAkahuTransactionCalendarDate = (date: AkahuTransactionDate): string => {
+  const calendarDate = getLeadingAkahuCalendarDate(date)
+  if (calendarDate === undefined) {
+    throw new Error(`Akahu transaction date invariant violated: ${date}`)
+  }
+
+  return calendarDate
+}
 
 export class Transaction extends Schema.Class<Transaction>("akahu/Transaction")({
   _id: Schema.String,
