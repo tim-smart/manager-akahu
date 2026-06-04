@@ -1,6 +1,6 @@
 import { Effect, type Brand, DateTime, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
-import { type CalendarDate, parseCalendarDate } from "./CalendarDate.ts"
+import { CalendarDate, parseCalendarDate } from "./CalendarDate.ts"
 import { BigDecimalFromNumber } from "./shared.ts"
 
 export class Merchant extends Schema.Class<Merchant>("akahu/Merchant")({
@@ -47,14 +47,22 @@ const parseAkahuTransactionDate = (
   return calendarDate === undefined ? undefined : { raw, calendarDate }
 }
 
-class AkahuTransactionDateValue extends Schema.Class<AkahuTransactionDateValue>(
-  "akahu/TransactionDate",
-)({
+type AssertTrue<T extends true> = T
+type AkahuTransactionDateValueShape = {
+  readonly raw: string
+  readonly calendarDate: CalendarDate
+}
+
+class AkahuTransactionDateValue extends Schema.Class<
+  AkahuTransactionDateValue,
+  { readonly AkahuTransactionDateNominal: unique symbol }
+>("akahu/TransactionDate")({
   raw: Schema.String,
-  calendarDate: Schema.String,
+  calendarDate: CalendarDate,
 }) {
-  declare readonly calendarDate: CalendarDate
-  declare private readonly AkahuTransactionDateNominal: void
+  declare static readonly nominalGuard: AssertTrue<
+    AkahuTransactionDateValueShape extends AkahuTransactionDateValue ? false : true
+  >
 }
 
 export const AkahuTransactionDate = Schema.String.pipe(
