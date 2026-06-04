@@ -794,6 +794,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add focused mocked website coverage asserting one account-level warning for an unsupported foreign-currency account, no Manager batch reads or writes, expected `settledFetched`/`pendingFetched`/`unsupportedSkipped` counts, and no duplicated per-transaction warning text. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass for this follow-up. Website build reports Vite's existing large-chunk warning.
 
+### Task 5 foreign-currency skip follow-up review: Narrow the importable account phase contract
+
+- Tighten `apps/website/src/Manager/SyncFlows.ts` after the account-level currency gate so normal settled/pending phases can only be entered for importable Manager accounts. The current `ManagerAkahuTransactionSyncAccountContext.importabilityDecision: ReturnType<typeof getManagerBankAccountCurrencyImportDecision>` still permits a skip decision even though `syncManagerAkahuTransactionsForAccount` returns early for skipped foreign-currency accounts, leaving the old per-transaction unsupported-account path structurally reachable.
+- Prefer an importable-only context contract, such as `Extract<ManagerBankAccountCurrencyImportDecision, { _tag: "import" }>` or a small source-local importable decision value, and pass that into `classifyManagerAkahuSuspenseImport` from the normal phases. Keep unsupported foreign-currency counting/warnings exclusively in the account-level unsupported summary path.
+- Preserve real per-transaction unsupported handling that is still meaningful, such as invalid amount or unsupported pending fingerprint construction, but avoid a contract where a future caller can accidentally reintroduce duplicate per-transaction foreign-currency warnings by passing a skip decision into the supported-account processors.
+- Add focused type or mocked coverage if useful to prove the normal phase context cannot carry a skip currency decision while the unsupported account path still emits one account-level warning and no Manager reads/writes.
+
 ### Task 6: Pending-transaction sync service extension with mocked tests (partially completed)
 
 - Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true. (completed)
