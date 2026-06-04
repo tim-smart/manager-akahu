@@ -12,6 +12,7 @@
     "@app/domain": "workspace:*",
     "@app/manager-api": "workspace:*",
     "@effect/atom-react": "catalog:",
+    "@effect/platform-browser": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",

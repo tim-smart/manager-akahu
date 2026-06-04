@@ -1,35 +1,15 @@
 import { Atom } from "effect/unstable/reactivity"
 import { ManagerFlows } from "./Flows"
-import { Effect } from "effect"
-import { AkahuCustomFields } from "@app/domain/Manager/AkahuCustomFields"
+import { Effect, Layer } from "effect"
+import { ApiClient } from "@/ApiClient"
 
-const runtime = Atom.runtime(ManagerFlows.layer)
-
-const akakuFieldsReadAtom = runtime
-  .atom(
-    Effect.fnUntraced(function* () {
-      const flows = yield* ManagerFlows
-      return yield* flows.getAkahuFields
-    }),
-  )
-  .pipe(Atom.withReactivity(["fields"]), Atom.keepAlive)
-
-const akakuFieldsWriteAtom = runtime.fn<AkahuCustomFields>()(
-  Effect.fnUntraced(function* (fields) {
-    const flows = yield* ManagerFlows
-    yield* flows.setAkahuFields(fields)
-  }),
-  {
-    reactivityKeys: ["fields"],
-  },
+const runtime = Atom.runtime((get) =>
+  ManagerFlows.layer.pipe(Layer.provide(get(ApiClient.runtime.layer))),
 )
 
-export const akakuFieldsAtom = Atom.writable(
-  (get) => {
-    get.mount(akakuFieldsWriteAtom)
-    return get(akakuFieldsReadAtom)
-  },
-  (ctx, fields: AkahuCustomFields) => {
-    ctx.set(akakuFieldsWriteAtom, fields)
-  },
+export const akakuFieldsAtom = runtime.atom(
+  Effect.fnUntraced(function* () {
+    const flows = yield* ManagerFlows
+    return yield* flows.getAkahuFields
+  }),
 )

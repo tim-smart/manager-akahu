@@ -11,10 +11,10 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vitest: npm:@voidzero-dev/vite-plus-test@latest
   vite-plus: latest
-  effect: 4.0.0-beta.75
+  effect: 4.0.0-beta.78
   react: ^19.2.6
   react-dom: ^19.2.6
-  "@effect/atom-react": 4.0.0-beta.75
+  "@effect/atom-react": 4.0.0-beta.78
   tailwindcss: ^4.3.0
   "@tailwindcss/vite": ^4.3.0
   class-variance-authority: ^0.7.1
@@ -27,11 +27,12 @@ catalog:
   "@vitejs/plugin-react": ^6.0.2
   swagger2openapi: ^7.0.8
   openapi-merge: ^1.3.3
-  "@effect/platform-node": 4.0.0-beta.75
+  "@effect/platform-node": 4.0.0-beta.78
   "@tim-smart/openapi-gen": ^1.0.4
   "@typescript/native-preview": 7.0.0-dev.20260527.2
   "@effect/language-service": ^0.86.2
   radix-ui: ^1.4.3
+  "@effect/platform-browser": 4.0.0-beta.78
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
@@ -48,11 +49,11 @@ patchedDependencies:
   openapi-merge: patches/openapi-merge.patch
 minimumReleaseAgeExclude:
   - "@tim-smart/openapi-gen@1.0.4"
-  - "@effect/atom-react@4.0.0-beta.75"
-  - "@effect/openapi-generator@4.0.0-beta.75"
-  - "@effect/platform-node-shared@4.0.0-beta.75"
-  - "@effect/platform-node@4.0.0-beta.75"
-  - effect@4.0.0-beta.75
+  - "@effect/atom-react@4.0.0-beta.78"
+  - "@effect/openapi-generator@4.0.0-beta.78"
+  - "@effect/platform-node-shared@4.0.0-beta.78"
+  - "@effect/platform-node@4.0.0-beta.78"
+  - effect@4.0.0-beta.78
   - "@effect/tsgo-darwin-arm64@0.13.1"
   - "@effect/tsgo-darwin-x64@0.13.1"
   - "@effect/tsgo-linux-arm64@0.13.1"
@@ -61,3 +62,4 @@ minimumReleaseAgeExclude:
   - "@effect/tsgo-win32-arm64@0.13.1"
   - "@effect/tsgo-win32-x64@0.13.1"
   - "@effect/tsgo@0.13.1"
+  - "@effect/platform-browser@4.0.0-beta.78"

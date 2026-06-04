@@ -1,14 +1,14 @@
 import { Schema } from "effect"
 import * as Rpc from "effect/unstable/rpc/Rpc"
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
+import { Account } from "./Akahu.ts"
 
-export class Health extends Schema.Class<Health>("Health")({
-  status: Schema.Literal("ok"),
-  uptime: Schema.Number,
+export class ListAccounts extends Rpc.make("ListAccounts", {
+  payload: {
+    akahuAppToken: Schema.Redacted(Schema.String),
+    akahuUserToken: Schema.Redacted(Schema.String),
+  },
+  success: Schema.Array(Account),
 }) {}
 
-export class GetHealth extends Rpc.make("GetHealth", {
-  success: Health,
-}) {}
-
-export const ApiRpcs = RpcGroup.make(GetHealth)
+export const ApiRpcs = RpcGroup.make(ListAccounts)

@@ -1,10 +1,23 @@
-import { ApiRpcs, Health } from "@app/domain/rpc"
+import { ApiRpcs } from "@app/domain/rpc"
 import { Effect, Layer } from "effect"
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc"
+import { Akahu, AkahuCredentials } from "./Akahu.ts"
 
-export const ApiHandlers = ApiRpcs.toLayer({
-  GetHealth: () => Effect.sync(() => new Health({ status: "ok", uptime: process.uptime() })),
-})
+export const ApiHandlers = ApiRpcs.toLayer(
+  Effect.gen(function* () {
+    const akahu = yield* Akahu
+
+    return ApiRpcs.of({
+      ListAccounts: ({ akahuAppToken, akahuUserToken }) =>
+        akahu.accounts.pipe(
+          Effect.provideService(AkahuCredentials, {
+            appToken: akahuAppToken,
+            userToken: akahuUserToken,
+          }),
+        ),
+    })
+  }),
+).pipe(Layer.provide(Akahu.layer))
 
 export const RpcRoute = RpcServer.layerHttp({
   group: ApiRpcs,

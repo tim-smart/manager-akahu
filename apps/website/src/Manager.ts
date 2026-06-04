@@ -2,6 +2,7 @@ import { Context, Deferred, Effect, Exit, Layer } from "effect"
 import * as ManagerClient from "@app/manager-api/ManagerClient"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"
 
+// @effect-diagnostics-next-line lazyEffect:off
 export class Manager extends Context.Service<Manager, ManagerClient.Client>()("Manager", {
   make: Effect.gen(function* () {
     const httpClient = yield* makeIframeHttpClient
@@ -38,6 +39,7 @@ const makeIframeHttpClient = Effect.gen(function* () {
   return HttpClient.makeWith<never, never, HttpClientError.HttpClientError, never>(
     Effect.fnUntraced(function* (eff) {
       const request = yield* eff
+      // @effect-diagnostics-next-line cryptoRandomUUIDInEffect:off
       const requestId = crypto.randomUUID()
       const deferred = Deferred.makeUnsafe<Response>()
       deferreds.set(requestId, deferred)
@@ -55,7 +57,8 @@ const makeIframeHttpClient = Effect.gen(function* () {
           path: request.url,
           body:
             request.body._tag === "Uint8Array"
-              ? JSON.parse(decoder.decode(request.body.body))
+              ? // @effect-diagnostics-next-line preferSchemaOverJson:off
+                JSON.parse(decoder.decode(request.body.body))
               : undefined,
         },
         "*",
