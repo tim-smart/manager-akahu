@@ -811,6 +811,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Keep website mocked coverage focused on real orchestration invariants: unsupported foreign-currency accounts emit one account-level warning, avoid Manager receipt/payment reads and writes, and normal importable account phases process domain-valid settled/pending transactions without admitting a skip currency decision. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, and `pnpm --filter website build` pass. Website build reports Vite's existing large-chunk warning.
 
+### Task 5 residual import token audit: Accept boundary cleanup (completed)
+
+- Deep code-quality review found no new actionable structural follow-up for the residual import-token cleanup. Keep `ManagerAkahuTransactionSyncAccountContext` limited to real per-account dependencies (`account`, `client`, and `syncRead`), keep the account-level foreign-currency `_tag === "skip"` branch as the only website sync path that observes skip currency decisions, and keep normal settled/pending classification call sites using the module-local `{ _tag: "import" }` decision rather than threading a payload-free policy token through account state. (completed)
+- Preserve the coverage boundary from this task: malformed pending amount inputs belong in the pure `buildAkahuPendingTransactionFingerprint` helper tests because that helper intentionally accepts string decimal inputs, while website orchestration tests should continue to use domain-valid `PendingTransaction`/`Transaction` values and focus on account-level unsupported-currency behavior plus normal importable-account orchestration. Do not reintroduce cast-backed website fixtures such as `as unknown as PendingTransaction` for invalid amount shapes. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, and `pnpm --filter website build` passing.
+
 ### Task 6: Pending-transaction sync service extension with mocked tests (partially completed)
 
 - Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true. (completed)
