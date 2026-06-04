@@ -11,7 +11,8 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.json"
+    "build": "tsc -b tsconfig.json",
+    "test:types": "tsc -p tsconfig.typetest.json --noEmit"
   },
   "dependencies": {
     "effect": "catalog:"

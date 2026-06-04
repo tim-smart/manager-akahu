@@ -141,6 +141,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 4 nominal date follow-up made decoded `AkahuTransactionDate` values nominal through the domain schema class and made `calendarDate` carry the shared branded exact `CalendarDate` invariant. Akahu raw-date decoding now uses one fallible transform that parses the raw string once and returns a schema issue for malformed dates, while manager-api tests use decoded dates or an explicit unsafe test escape hatch for intentionally inconsistent structural values.
 - Task 4 Akahu date schema invariant follow-up moved the `calendarDate` field invariant into the `AkahuTransactionDateValue` class schema by using the shared `CalendarDate` schema directly and replaced the declaration-only private nominal field with Effect's schema class brand parameter. Focused domain tests now cover raw-date preservation, `CalendarDate` typing, nominal rejection of structural values, encoding back to the original Akahu raw string, and malformed calendar components.
 - Task 4 Akahu date nominal-guard cleanup removed the production-only `AssertTrue`, structural shape alias, and static `nominalGuard` scaffolding from the domain schema class. Nominality remains provided by the `Schema.Class` brand parameter, with proof kept in focused tests rather than production code.
+- Task 4 Akahu date typetest follow-up moved the structural nominality proof out of the runtime Akahu Vitest file and into `packages/domain/typetests/AkahuTransactionDate.typetest.ts`, enforced by `pnpm --filter @app/domain test:types` through a no-emit typecheck.
 
 ## Requirements
 
@@ -665,12 +666,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Keep the existing single fallible raw-string transform, the shared `CalendarDate` field schema, and the Manager-side date separation unchanged. (completed)
 - Validation: `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, and `pnpm --filter @app/manager-api build` pass.
 
-### Task 4 follow-up review follow-up audit follow-up review follow-up review follow-up review: Enforce Akahu date nominality proof outside production code
+### Task 4 follow-up review follow-up audit follow-up review follow-up review follow-up review: Enforce Akahu date nominality proof outside production code (completed)
 
-- Move the Akahu transaction date structural-rejection proof out of the runtime-only Vitest path and into an enforced no-emit typecheck boundary, such as a focused domain typetest file or a test tsconfig/script that is included in validation. The current `@ts-expect-error` in `packages/domain/tests/Akahu.test.ts` documents the intended nominal contract, but `packages/domain/tsconfig.json` only includes `src`, `@app/domain` build only typechecks production sources, and the listed `pnpm test "packages/domain/tests/Akahu.test.ts"` command does not reliably fail on a stale or unused `@ts-expect-error`.
-- Keep production `packages/domain/src/Akahu.ts` free of nominal guard scaffolding. The fix should not reintroduce `AssertTrue`, private phantom fields, static assertion members, wrapper types, or other production-only self-tests just to regain type proof coverage.
-- Prefer a direct, source-local type assertion that fails if structural `{ raw, calendarDate }` values become assignable to `AkahuTransactionDate`, and keep the runtime Akahu date tests focused on decode/encode behavior and malformed calendar rejection.
-- Update validation for this boundary to name the enforced typecheck command in addition to the existing domain/runtime test and downstream build checks.
+- Move the Akahu transaction date structural-rejection proof out of the runtime-only Vitest path and into an enforced no-emit typecheck boundary, such as a focused domain typetest file or a test tsconfig/script that is included in validation. The current `@ts-expect-error` in `packages/domain/tests/Akahu.test.ts` documents the intended nominal contract, but `packages/domain/tsconfig.json` only includes `src`, `@app/domain` build only typechecks production sources, and the listed `pnpm test "packages/domain/tests/Akahu.test.ts"` command does not reliably fail on a stale or unused `@ts-expect-error`. (completed)
+- Keep production `packages/domain/src/Akahu.ts` free of nominal guard scaffolding. The fix should not reintroduce `AssertTrue`, private phantom fields, static assertion members, wrapper types, or other production-only self-tests just to regain type proof coverage. (completed)
+- Prefer a direct, source-local type assertion that fails if structural `{ raw, calendarDate }` values become assignable to `AkahuTransactionDate`, and keep the runtime Akahu date tests focused on decode/encode behavior and malformed calendar rejection. (completed)
+- Update validation for this boundary to name the enforced typecheck command in addition to the existing domain/runtime test and downstream build checks. (completed)
+- Validation: `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/domain test:types` pass.
 
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
