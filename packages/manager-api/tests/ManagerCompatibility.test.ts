@@ -1,11 +1,12 @@
 import { expect, test } from "vite-plus/test"
 import {
-  buildManagerSuspensePaymentPayload,
-  buildManagerSuspenseReceiptPayload,
+  buildManagerSuspenseImportDecision,
   getManagerBankAccountCurrencyImportDecision,
   ManagerBankAccountClearStatusValue,
   managerPendingClearanceFields,
   managerSettledClearanceFields,
+  type ManagerPostPayment,
+  type ManagerPostReceipt,
 } from "../src/index.ts"
 
 test("records Manager bank account clear status values behind names", () => {
@@ -17,18 +18,127 @@ test("records Manager bank account clear status values behind names", () => {
   expect(managerPendingClearanceFields).toEqual({ cleared: 1 })
 })
 
-test("builds a minimal suspense receipt payload without paidBy or bankClearDate", () => {
-  const payload = buildManagerSuspenseReceiptPayload({
+test("builds a receipt import decision for positive signed amounts", () => {
+  const decision = buildManagerSuspenseImportDecision({
     bankOrCashAccountKey: "bank-1",
     date: "2026-06-04",
-    amount: "12.34",
+    signedNormalizedAmount: "12.34",
     reference: "akahu-tx-1",
     description: "Coffee shop",
     fdxTransactionId: "akahu-tx-1",
     clearance: { _tag: "settled" },
+    importabilityDecision: { _tag: "import" },
   })
 
-  expect(payload).toEqual({
+  expect(decision).toEqual({
+    _tag: "receipt",
+    payload: {
+      value: {
+        date: "2026-06-04",
+        reference: "akahu-tx-1",
+        receivedIn: "bank-1",
+        cleared: ManagerBankAccountClearStatusValue.onSameDate,
+        description: "Coffee shop",
+        lines: [{ amount: "12.34", lineDescription: "Coffee shop" }],
+        fdxTransactionId: "akahu-tx-1",
+      },
+    },
+  })
+  expect(decision._tag).toBe("receipt")
+  if (decision._tag !== "receipt") {
+    return
+  }
+  const endpointPayload = decision.payload satisfies ManagerPostReceipt
+  expect("paidBy" in endpointPayload.value).toBe(false)
+  expect("bankClearDate" in endpointPayload.value).toBe(false)
+})
+
+test("builds a payment import decision for negative signed amounts using the absolute amount", () => {
+  const decision = buildManagerSuspenseImportDecision({
+    bankOrCashAccountKey: "bank-1",
+    date: "2026-06-04",
+    signedNormalizedAmount: "-9.99",
+    reference: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
+    description: "Shop",
+    fdxTransactionId: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
+    clearance: { _tag: "pending" },
+    importabilityDecision: { _tag: "import" },
+  })
+
+  expect(decision).toEqual({
+    _tag: "payment",
+    payload: {
+      value: {
+        date: "2026-06-04",
+        reference: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
+        paidFrom: "bank-1",
+        cleared: ManagerBankAccountClearStatusValue.onLaterDate,
+        description: "Shop",
+        lines: [{ amount: "9.99", lineDescription: "Shop" }],
+        fdxTransactionId: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
+      },
+    },
+  })
+  expect(decision._tag).toBe("payment")
+  if (decision._tag !== "payment") {
+    return
+  }
+  const endpointPayload = decision.payload satisfies ManagerPostPayment
+  expect("payee" in endpointPayload.value).toBe(false)
+  expect("bankClearDate" in endpointPayload.value).toBe(false)
+})
+
+test("skips zero signed amounts before receipt or payment classification", () => {
+  expect(
+    buildManagerSuspenseImportDecision({
+      bankOrCashAccountKey: "bank-1",
+      date: "2026-06-04",
+      signedNormalizedAmount: "0.00",
+      reference: "akahu-tx-1",
+      description: "Zero value",
+      fdxTransactionId: "akahu-tx-1",
+      clearance: { _tag: "settled" },
+      importabilityDecision: { _tag: "import" },
+    }),
+  ).toEqual({ _tag: "skip", reason: { _tag: "zeroAmount", signedNormalizedAmount: "0.00" } })
+})
+
+test("returns explicit skip decisions for unsupported Manager account imports", () => {
+  expect(
+    buildManagerSuspenseImportDecision({
+      bankOrCashAccountKey: "bank-1",
+      date: "2026-06-04",
+      signedNormalizedAmount: "12.34",
+      reference: "akahu-tx-1",
+      description: "Coffee shop",
+      fdxTransactionId: "akahu-tx-1",
+      clearance: { _tag: "settled" },
+      importabilityDecision: { _tag: "skip", warning: "Skipping foreign account" },
+    }),
+  ).toEqual({
+    _tag: "skip",
+    reason: { _tag: "notImportable", warning: "Skipping foreign account" },
+  })
+})
+
+test("builds direct settled receipt payload shape", () => {
+  const decision = buildManagerSuspenseImportDecision({
+    bankOrCashAccountKey: "bank-1",
+    date: "2026-06-04",
+    signedNormalizedAmount: "12.34",
+    reference: "akahu-tx-1",
+    description: "Coffee shop",
+    fdxTransactionId: "akahu-tx-1",
+    clearance: { _tag: "settled" },
+    importabilityDecision: { _tag: "import" },
+  })
+
+  expect(decision._tag).toBe("receipt")
+  if (decision._tag !== "receipt") {
+    return
+  }
+
+  expect(decision.payload).toEqual({
     value: {
       date: "2026-06-04",
       reference: "akahu-tx-1",
@@ -39,22 +149,26 @@ test("builds a minimal suspense receipt payload without paidBy or bankClearDate"
       fdxTransactionId: "akahu-tx-1",
     },
   })
-  expect("paidBy" in payload.value).toBe(false)
-  expect("bankClearDate" in payload.value).toBe(false)
 })
 
-test("builds a minimal suspense payment payload without payee or bankClearDate", () => {
-  const payload = buildManagerSuspensePaymentPayload({
+test("builds direct pending payment payload shape", () => {
+  const decision = buildManagerSuspenseImportDecision({
     bankOrCashAccountKey: "bank-1",
     date: "2026-06-04",
-    amount: "9.99",
+    signedNormalizedAmount: "-9.99",
     reference: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
     description: "Shop",
     fdxTransactionId: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
     clearance: { _tag: "pending" },
+    importabilityDecision: { _tag: "import" },
   })
 
-  expect(payload).toEqual({
+  expect(decision._tag).toBe("payment")
+  if (decision._tag !== "payment") {
+    return
+  }
+
+  expect(decision.payload).toEqual({
     value: {
       date: "2026-06-04",
       reference: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
@@ -65,8 +179,6 @@ test("builds a minimal suspense payment payload without payee or bankClearDate",
       fdxTransactionId: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
     },
   })
-  expect("payee" in payload.value).toBe(false)
-  expect("bankClearDate" in payload.value).toBe(false)
 })
 
 test("skips foreign-currency Manager accounts until write behaviour is verified", () => {

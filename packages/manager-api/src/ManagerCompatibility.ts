@@ -1,8 +1,10 @@
 import type {
   BankAccountClearStatus as ManagerBankAccountClearStatus,
   BankOrCashAccount as ManagerBankOrCashAccount,
-  Receipt2 as ManagerReceiptCreate,
   Payment2 as ManagerPaymentCreate,
+  PostPayment as ManagerPostPayment,
+  PostReceipt as ManagerPostReceipt,
+  Receipt2 as ManagerReceiptCreate,
 } from "./ManagerClient.ts"
 
 export const ManagerBankAccountClearStatusValue = {
@@ -12,22 +14,29 @@ export const ManagerBankAccountClearStatusValue = {
 
 export type ManagerImportClearance = { readonly _tag: "settled" } | { readonly _tag: "pending" }
 
-export interface ManagerSuspenseImportInput {
+export type ManagerLineAmount = string
+
+export interface ManagerSuspenseImportDecisionInput {
   readonly bankOrCashAccountKey: string
   readonly date: string
-  readonly amount: string
+  readonly signedNormalizedAmount: ManagerLineAmount
   readonly reference: string
   readonly description: string
   readonly fdxTransactionId: string
   readonly clearance: ManagerImportClearance
+  readonly importabilityDecision: ManagerBankAccountCurrencyImportDecision
 }
 
-export interface ManagerSuspenseLine {
-  readonly amount: string
-  readonly lineDescription: string
-}
+type ManagerReceiptCreateLine = NonNullable<ManagerReceiptCreate["lines"]>[number]
+type ManagerPaymentCreateLine = NonNullable<ManagerPaymentCreate["lines"]>[number]
 
-export interface ManagerSuspenseReceiptValue {
+export type ManagerSuspenseLine = Pick<ManagerReceiptCreateLine, "amount" | "lineDescription"> &
+  Pick<ManagerPaymentCreateLine, "amount" | "lineDescription"> & {
+    readonly amount: ManagerLineAmount
+    readonly lineDescription: string
+  }
+
+export interface ManagerSuspenseReceiptValue extends ManagerReceiptCreate {
   readonly date: NonNullable<ManagerReceiptCreate["date"]>
   readonly reference: NonNullable<ManagerReceiptCreate["reference"]>
   readonly receivedIn: NonNullable<ManagerReceiptCreate["receivedIn"]>
@@ -37,11 +46,11 @@ export interface ManagerSuspenseReceiptValue {
   readonly fdxTransactionId: NonNullable<ManagerReceiptCreate["fdxTransactionId"]>
 }
 
-export interface ManagerSuspenseReceiptPayload {
+export interface ManagerSuspenseReceiptPayload extends ManagerPostReceipt {
   readonly value: ManagerSuspenseReceiptValue
 }
 
-export interface ManagerSuspensePaymentValue {
+export interface ManagerSuspensePaymentValue extends ManagerPaymentCreate {
   readonly date: NonNullable<ManagerPaymentCreate["date"]>
   readonly reference: NonNullable<ManagerPaymentCreate["reference"]>
   readonly paidFrom: NonNullable<ManagerPaymentCreate["paidFrom"]>
@@ -51,9 +60,18 @@ export interface ManagerSuspensePaymentValue {
   readonly fdxTransactionId: NonNullable<ManagerPaymentCreate["fdxTransactionId"]>
 }
 
-export interface ManagerSuspensePaymentPayload {
+export interface ManagerSuspensePaymentPayload extends ManagerPostPayment {
   readonly value: ManagerSuspensePaymentValue
 }
+
+export type ManagerSuspenseImportSkipReason =
+  | { readonly _tag: "zeroAmount"; readonly signedNormalizedAmount: ManagerLineAmount }
+  | { readonly _tag: "notImportable"; readonly warning: string }
+
+export type ManagerSuspenseImportDecision =
+  | { readonly _tag: "receipt"; readonly payload: ManagerSuspenseReceiptPayload }
+  | { readonly _tag: "payment"; readonly payload: ManagerSuspensePaymentPayload }
+  | { readonly _tag: "skip"; readonly reason: ManagerSuspenseImportSkipReason }
 
 export type ManagerBankAccountCurrencyImportDecision =
   | { readonly _tag: "import" }
@@ -68,17 +86,38 @@ export const managerSettledClearanceFields = {
 } as const satisfies Pick<ManagerReceiptCreate, "cleared">
 
 const buildManagerSuspenseLine = (
-  input: Pick<ManagerSuspenseImportInput, "amount" | "description">,
-) => ({
-  amount: input.amount,
-  lineDescription: input.description,
-})
+  input: Pick<ManagerSuspensePayloadInput, "amount" | "description">,
+) =>
+  ({
+    amount: input.amount,
+    lineDescription: input.description,
+  }) satisfies ManagerSuspenseLine
 
 const buildManagerClearanceFields = (clearance: ManagerImportClearance) =>
   clearance._tag === "pending" ? managerPendingClearanceFields : managerSettledClearanceFields
 
-export const buildManagerSuspenseReceiptPayload = (
-  input: ManagerSuspenseImportInput,
+interface ManagerSuspensePayloadInput extends Omit<
+  ManagerSuspenseImportDecisionInput,
+  "importabilityDecision" | "signedNormalizedAmount"
+> {
+  readonly amount: ManagerLineAmount
+}
+
+const getManagerLineAmountMagnitude = (
+  signedNormalizedAmount: ManagerLineAmount,
+): ManagerLineAmount => {
+  if (signedNormalizedAmount.startsWith("-") || signedNormalizedAmount.startsWith("+")) {
+    return signedNormalizedAmount.slice(1)
+  }
+
+  return signedNormalizedAmount
+}
+
+const isZeroManagerLineAmount = (signedNormalizedAmount: ManagerLineAmount): boolean =>
+  /^0+(?:\.0+)?$/.test(getManagerLineAmountMagnitude(signedNormalizedAmount))
+
+const buildManagerSuspenseReceiptPayload = (
+  input: ManagerSuspensePayloadInput,
 ): ManagerSuspenseReceiptPayload => ({
   value: {
     date: input.date,
@@ -91,8 +130,8 @@ export const buildManagerSuspenseReceiptPayload = (
   },
 })
 
-export const buildManagerSuspensePaymentPayload = (
-  input: ManagerSuspenseImportInput,
+const buildManagerSuspensePaymentPayload = (
+  input: ManagerSuspensePayloadInput,
 ): ManagerSuspensePaymentPayload => ({
   value: {
     date: input.date,
@@ -104,6 +143,33 @@ export const buildManagerSuspensePaymentPayload = (
     fdxTransactionId: input.fdxTransactionId,
   },
 })
+
+export const buildManagerSuspenseImportDecision = (
+  input: ManagerSuspenseImportDecisionInput,
+): ManagerSuspenseImportDecision => {
+  if (input.importabilityDecision._tag === "skip") {
+    return {
+      _tag: "skip",
+      reason: { _tag: "notImportable", warning: input.importabilityDecision.warning },
+    }
+  }
+
+  if (isZeroManagerLineAmount(input.signedNormalizedAmount)) {
+    return {
+      _tag: "skip",
+      reason: { _tag: "zeroAmount", signedNormalizedAmount: input.signedNormalizedAmount },
+    }
+  }
+
+  const amount = getManagerLineAmountMagnitude(input.signedNormalizedAmount)
+  const payloadInput = { ...input, amount }
+
+  if (input.signedNormalizedAmount.startsWith("-")) {
+    return { _tag: "payment", payload: buildManagerSuspensePaymentPayload(payloadInput) }
+  }
+
+  return { _tag: "receipt", payload: buildManagerSuspenseReceiptPayload(payloadInput) }
+}
 
 export const getManagerBankAccountCurrencyImportDecision = (
   account: Pick<ManagerBankOrCashAccount, "currency" | "name">,

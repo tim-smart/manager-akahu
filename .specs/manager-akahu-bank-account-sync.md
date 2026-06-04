@@ -85,6 +85,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Live `POST /api4/receipt` and `POST /api4/payment` validation was not possible in this workspace because no Manager business/API host was available. Current validation is generated-client shape plus Manager guide behaviour, covered by focused tests.
 - Foreign-currency Manager bank/cash account write behaviour was not verified. `getManagerBankAccountCurrencyImportDecision` treats blank/null account currency as importable and returns a skip-with-warning decision for any non-empty currency value.
 - Task 1 follow-up tightened the suspense receipt/payment payload builders to return local payload types with required `value` objects, so downstream sync code can use `payload.value` without non-null assertions. Builder amount input is now a normalized decimal string boundary instead of `number | string`; future Akahu amount normalization must happen before calling these Manager payload builders.
+- Task 1 follow-up review replaced the public suspense receipt/payment builder pair with `buildManagerSuspenseImportDecision`. The helper now owns signed amount classification, payment absolute-amount conversion, zero-amount skipping, and importability skips before returning a receipt payload, payment payload, or explicit skip reason. Receipt/payment constructors remain private, and focused tests assert the local payloads remain assignable to the generated Manager POST endpoint wrappers.
 
 ## Requirements
 
@@ -403,7 +404,7 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Move the compatibility tests out of `packages/manager-api/tests/index.test.ts` into a focused `ManagerCompatibility.test.ts`, leaving `index.test.ts` as a barrel/package-name smoke test. The current test file is already becoming a grab bag and will grow harder to scan as more compatibility cases are added.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
-### Task 1 follow-up review: Consolidate Manager suspense import boundary
+### Task 1 follow-up review: Consolidate Manager suspense import boundary (completed)
 
 - Replace the public receipt/payment builder pair with one canonical Manager suspense import decision helper before sync code depends on them. The helper should accept the signed normalized amount, account key, date/reference/description/fdxTransactionId, clearance, and any importability decision needed at this layer, then return a discriminated union for receipt payload, payment payload, or an explicit skip reason. Keep receipt/payment-specific constructors private implementation details if they still help locally.
 - Use that helper as the owner of positive-vs-negative classification, absolute amount conversion, and zero-amount skipping so later sync orchestration does not grow ad-hoc conditionals around `buildManagerSuspenseReceiptPayload` and `buildManagerSuspensePaymentPayload`.
