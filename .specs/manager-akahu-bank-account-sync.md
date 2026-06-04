@@ -102,6 +102,9 @@ The generated Manager API client includes endpoints and fields needed for this f
 - `fetchManagerBankOrCashAccountSyncRead` is now the canonical Manager sync read helper for one bank/cash account. It fetches complete receipts and payments in parallel, then returns the separate arrays plus typed `existingFdxTransactionIdEntries` and an `existingFdxTransactionIdIndex` keyed by `fdxTransactionId` for later de-duplication.
 - Public Manager batch reads no longer expose `pageSize` on `ManagerBankOrCashAccountBatchReadInput`; production receipt/payment sync reads always use `managerBatchReadDefaultPageSize` for Manager `PageSize` requests.
 - Focused manager-api tests now cover both receipt and payment paths through the shared pager, the canonical sync-read helper, duplicate `fdxTransactionId` entries beyond the first default-size page for both resource types, and expected request sequences without public page-size overrides. `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass for this follow-up review.
+- Task 2 Akahu boundary follow-up replaced helper-only tests with `RpcTest` coverage for `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` backed by the real Akahu service request wiring and an injected mock HTTP client. The tests assert all items are returned across multiple cursor pages and capture the concrete Akahu request path/query shape, including `amount_as_number=true` on every pending transaction page.
+- `paginatedAkahuItems` is now private to `apps/server/src/Akahu.ts`; tests no longer import the helper. `Akahu.layerWithHttpClient` provides the same service implementation with injectable transport for tests, while `Akahu.layer` remains the live Node/Undici layer.
+- No settled older-history/date-window RPC boundary was added in this task. The settled transaction boundary remains the existing account transaction request with cursor pagination only, so future five-overlap sync work still needs to add or verify the older-history fetch mechanism.
 
 ## Requirements
 
@@ -469,12 +472,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve coverage that the public read input has no page-size override and that all Manager requests use `managerBatchReadDefaultPageSize`; the goal is to delete test noise, not reintroduce a test-only production knob or weaken pagination assertions.
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
-### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary
+### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary (completed)
 
-- Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly.
-- Assert the concrete Akahu request/query shape for all three paths: account pages request `cursor`, settled transaction pages request `cursor` and any required older-history/date-window parameters for the five-overlap stop condition, and pending transaction pages request both `amount_as_number=true` and `cursor` on every page.
-- Verify RPC consumption returns all `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` items across multiple pages, not only that the exported helper can flatten mock strings.
-- After boundary coverage exists, make `paginatedAkahuItems` private to `apps/server/src/Akahu.ts` unless another production module has a real need for it. Avoid exporting implementation details solely to test them.
+- Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly. (completed)
+- Assert the concrete Akahu request/query shape for all three paths: account pages request `cursor`, settled transaction pages request `cursor` and any required older-history/date-window parameters for the five-overlap stop condition, and pending transaction pages request both `amount_as_number=true` and `cursor` on every page. (completed for current cursor-only settled boundary; no older-history/date-window boundary was added)
+- Verify RPC consumption returns all `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` items across multiple pages, not only that the exported helper can flatten mock strings. (completed)
+- After boundary coverage exists, make `paginatedAkahuItems` private to `apps/server/src/Akahu.ts` unless another production module has a real need for it. Avoid exporting implementation details solely to test them. (completed)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, `pnpm --filter @app/domain build`, and `pnpm ready` pass.
 
 ### Task 3: Setup-state flow, atom, and minimal setup UI

@@ -3,7 +3,7 @@ import { Effect, Layer, Stream } from "effect"
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc"
 import { Akahu, AkahuCredentials } from "./Akahu.ts"
 
-export const ApiHandlers = ApiRpcs.toLayer(
+export const ApiHandlersWithoutAkahu = ApiRpcs.toLayer(
   Effect.gen(function* () {
     const akahu = yield* Akahu
 
@@ -31,7 +31,9 @@ export const ApiHandlers = ApiRpcs.toLayer(
         ),
     })
   }),
-).pipe(Layer.provide(Akahu.layer))
+)
+
+export const ApiHandlers = ApiHandlersWithoutAkahu.pipe(Layer.provide(Akahu.layer))
 
 export const RpcRoute = RpcServer.layerHttp({
   group: ApiRpcs,
