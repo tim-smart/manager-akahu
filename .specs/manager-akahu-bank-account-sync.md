@@ -519,6 +519,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve `ApiHandlersBase` only if tests still need the handler-level mock-Akahu seam. Do not reintroduce negative/test-only production names or an HTTP-client-specific Akahu helper. (completed; `apps/server/tests/Akahu.test.ts` still uses `ApiHandlersBase` with a mock Akahu HTTP client)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass.
 
+### Task 2 follow-up review follow-up review: Accept Akahu RPC live composition collapse (completed)
+
+- Deep code-quality review found no actionable structural follow-up for the Akahu RPC live composition collapse. Keep the unused live `ApiHandlers` export removed, keep `ApiHandlersBase` as the neutral mock-Akahu handler seam used by `apps/server/tests/Akahu.test.ts`, and keep `RpcRoute` as the only live route composition that provides `Akahu.layer`. (completed)
+- Do not reintroduce a second live handler export, negative/test-only production naming, or an HTTP-client-specific Akahu helper in later RPC work. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` passing.
+
 ### Task 3: Setup-state flow, atom, and minimal setup UI
 
 - Add extended LinkedAccount metadata including canHavePendingTransactions and currency.
