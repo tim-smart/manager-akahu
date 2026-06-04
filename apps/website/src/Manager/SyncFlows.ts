@@ -20,7 +20,7 @@ import {
   type ManagerBankOrCashAccountSyncReadClient,
 } from "@app/manager-api/ManagerBatchPagination"
 import { getManagerBankAccountCurrencyImportDecision } from "@app/manager-api/ManagerCompatibility"
-import type { Client } from "@app/manager-api/ManagerClient"
+import type { Client, PutPayment, PutReceipt } from "@app/manager-api/ManagerClient"
 import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import { AkahuTokens as AkahuTokensSchema } from "@app/domain/Manager/AkahuCustomFields"
 
@@ -96,6 +96,10 @@ type ManagerAkahuTransactionCreateClassification = Extract<
   ManagerAkahuSuspenseImportClassification,
   { readonly _tag: "receipt" | "payment" }
 >
+
+type ManagerAkahuExactPendingFingerprintUpdate =
+  | { readonly _tag: "receipt"; readonly payload: PutReceipt }
+  | { readonly _tag: "payment"; readonly payload: PutPayment }
 
 interface ManagerAkahuTransactionSyncAccountContext {
   readonly account: LinkedAccount
@@ -598,16 +602,14 @@ const updateManagerAkahuPendingTransaction = Effect.fn("updateManagerAkahuPendin
       return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
     }
 
+    const update = buildManagerAkahuExactPendingFingerprintUpdate({
+      classification: input.classification,
+      entry: input.entry,
+    })
     const write =
-      input.classification._tag === "receipt"
-        ? input.client["PUT/api4/receipt"]({
-            key: input.entry.key,
-            value: input.classification.managerDecision.payload.value,
-          })
-        : input.client["PUT/api4/payment"]({
-            key: input.entry.key,
-            value: input.classification.managerDecision.payload.value,
-          })
+      update._tag === "receipt"
+        ? input.client["PUT/api4/receipt"](update.payload)
+        : input.client["PUT/api4/payment"](update.payload)
 
     const writeResult = yield* write.pipe(
       Effect.as({ _tag: "updated" as const }),
@@ -627,6 +629,31 @@ const updateManagerAkahuPendingTransaction = Effect.fn("updateManagerAkahuPendin
     return incrementManagerAkahuTransactionSyncAccountCount(state, "pendingUpdated")
   },
 )
+
+const buildManagerAkahuExactPendingFingerprintUpdate = (input: {
+  readonly classification: ManagerAkahuTransactionCreateClassification
+  readonly entry: ManagerBankOrCashAccountSyncRead["existingFdxTransactionIdEntries"][number]
+}): ManagerAkahuExactPendingFingerprintUpdate => {
+  // Exact pending-fingerprint updates intentionally replace the entry with the
+  // canonical Akahu suspense payload until a safe field-preservation policy is verified.
+  if (input.classification._tag === "receipt") {
+    return {
+      _tag: "receipt",
+      payload: {
+        key: input.entry.key,
+        value: input.classification.managerDecision.payload.value,
+      },
+    }
+  }
+
+  return {
+    _tag: "payment",
+    payload: {
+      key: input.entry.key,
+      value: input.classification.managerDecision.payload.value,
+    },
+  }
+}
 
 const initialManagerAkahuTransactionSyncAccountState =
   (): ManagerAkahuTransactionSyncAccountState => ({

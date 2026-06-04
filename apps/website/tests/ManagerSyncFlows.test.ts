@@ -724,6 +724,148 @@ it.effect("repeats pending sync without creating duplicate Manager entries", () 
 )
 
 it.effect(
+  "updates exact pending receipt and payment matches with canonical replacement payloads",
+  () =>
+    Effect.gen(function* () {
+      const managerAccount = linkedAccount({ canHavePendingTransactions: true })
+      const receiptFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:3.21:existing coffee"
+      const paymentFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:-7.89:book store"
+      const existingReceipt = pendingReceiptItem("receipt-existing-pending", {
+        fdxTransactionId: receiptFingerprint,
+        amount: "3.21",
+        description: "User edited receipt",
+      })
+      const existingPayment = pendingPaymentItem("payment-existing-pending", {
+        fdxTransactionId: paymentFingerprint,
+        amount: "-7.89",
+        description: "User edited payment",
+      })
+      const { client, receiptPayloads, paymentPayloads, receiptPutPayloads, paymentPutPayloads } =
+        makeMockClient({
+          receiptsByAccount: {
+            "manager-checking": [
+              {
+                ...existingReceipt,
+                item: {
+                  ...existingReceipt.item,
+                  bankClearDate: "2026-06-06",
+                  customFields: { userEdited: true },
+                  lines: [
+                    {
+                      account: "manually-categorized-account",
+                      amount: "3.21",
+                      lineDescription: "Manual receipt category",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          paymentsByAccount: {
+            "manager-checking": [
+              {
+                ...existingPayment,
+                item: {
+                  ...existingPayment.item,
+                  bankClearDate: "2026-06-06",
+                  customFields: { userEdited: true },
+                  lines: [
+                    {
+                      account: "manually-categorized-account",
+                      amount: "7.89",
+                      lineDescription: "Manual payment category",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        })
+
+      const summary = yield* runTransactionSync({
+        accounts: [managerAccount],
+        client,
+        pendingTransactionsByAccount: {
+          [accountId]: [
+            pendingTransaction({ amount: "3.21", description: "Existing Coffee" }),
+            pendingTransaction({ amount: "-7.89", description: "Book Store" }),
+          ],
+        },
+      })
+
+      expect(receiptPayloads).toEqual([])
+      expect(paymentPayloads).toEqual([])
+      expect(receiptPutPayloads).toEqual([
+        {
+          key: "receipt-existing-pending",
+          value: {
+            date: "2026-06-05",
+            reference: receiptFingerprint,
+            cleared: 1,
+            description: "Existing Coffee",
+            fdxTransactionId: receiptFingerprint,
+            lines: [{ amount: "3.21", lineDescription: "Existing Coffee" }],
+            receivedIn: "manager-checking",
+          },
+        },
+      ])
+      expect(paymentPutPayloads).toEqual([
+        {
+          key: "payment-existing-pending",
+          value: {
+            date: "2026-06-05",
+            reference: paymentFingerprint,
+            cleared: 1,
+            description: "Book Store",
+            fdxTransactionId: paymentFingerprint,
+            lines: [{ amount: "7.89", lineDescription: "Book Store" }],
+            paidFrom: "manager-checking",
+          },
+        },
+      ])
+      expect(summary.overall).toMatchObject({
+        pendingFetched: 2,
+        receiptsCreated: 0,
+        paymentsCreated: 0,
+        pendingUpdated: 2,
+        duplicatesSkipped: 0,
+        errors: 0,
+      })
+    }),
+)
+
+it.effect("does not repeat an exact pending update for duplicate pending rows", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount({ canHavePendingTransactions: true })
+    const fingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:4.00:repeat coffee"
+    const { client, receiptPutPayloads } = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [receiptItem("receipt-existing-pending", fingerprint)],
+      },
+    })
+
+    const summary = yield* runTransactionSync({
+      accounts: [managerAccount],
+      client,
+      pendingTransactionsByAccount: {
+        [accountId]: [
+          pendingTransaction({ amount: "4.00", description: "Repeat Coffee" }),
+          pendingTransaction({ amount: "4.00", description: "Repeat Coffee" }),
+        ],
+      },
+    })
+
+    expect(receiptPutPayloads.map((payload) => payload.key)).toEqual(["receipt-existing-pending"])
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 2,
+      pendingUpdated: 1,
+      duplicatesSkipped: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect(
   "replaces exactly one safe pending receipt or payment with a settled Manager update",
   () =>
     Effect.gen(function* () {
