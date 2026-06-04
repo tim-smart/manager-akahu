@@ -1,6 +1,5 @@
-import { Effect, type Brand, DateTime, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
+import { type Brand, DateTime, Schema, SchemaGetter } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
-import { CalendarDate, parseCalendarDate } from "./CalendarDate.ts"
 import { BigDecimalFromNumber } from "./shared.ts"
 
 export class Merchant extends Schema.Class<Merchant>("akahu/Merchant")({
@@ -23,57 +22,12 @@ export type AccountId = typeof AccountId.Type
 export const UserId = Schema.String.pipe(Schema.brand("akahu/UserId"))
 export type UserId = typeof UserId.Type
 
-const leadingCalendarDate = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/
-
-const invalidAkahuTransactionDateIssue = (raw: string) =>
-  new SchemaIssue.InvalidValue(Option.some(raw), {
-    message: "Akahu transaction date must start with a valid yyyy-mm-dd calendar date",
-  })
-
-const getLeadingAkahuCalendarDate = (value: string): CalendarDate | undefined => {
-  const match = leadingCalendarDate.exec(value)
-  const calendarDate = match?.[1]
-  if (calendarDate === undefined) {
-    return undefined
-  }
-
-  return parseCalendarDate(calendarDate)?.date
-}
-
-const parseAkahuTransactionDate = (
-  raw: string,
-): { readonly raw: string; readonly calendarDate: CalendarDate } | undefined => {
-  const calendarDate = getLeadingAkahuCalendarDate(raw)
-  return calendarDate === undefined ? undefined : { raw, calendarDate }
-}
-
-class AkahuTransactionDateValue extends Schema.Class<
-  AkahuTransactionDateValue,
-  { readonly AkahuTransactionDateNominal: unique symbol }
->("akahu/TransactionDate")({
-  raw: Schema.String,
-  calendarDate: CalendarDate,
-}) {}
-
-export const AkahuTransactionDate = Schema.String.pipe(
-  Schema.decodeTo(AkahuTransactionDateValue, {
-    decode: SchemaGetter.transformOrFail((raw) => {
-      const date = parseAkahuTransactionDate(raw)
-      return date === undefined
-        ? Effect.fail(invalidAkahuTransactionDateIssue(raw))
-        : Effect.succeed(new AkahuTransactionDateValue(date))
-    }),
-    encode: SchemaGetter.transform((date) => date.raw),
-  }),
-)
-export type AkahuTransactionDate = typeof AkahuTransactionDate.Type
-
 export class Transaction extends Schema.Class<Transaction>("akahu/Transaction")({
   _id: Schema.String,
   _account: AccountId,
   _user: UserId,
   _connection: ConnectionId,
-  date: AkahuTransactionDate,
+  date: Schema.DateTimeUtcFromString,
   description: Schema.String,
   amount: BigDecimalFromNumber,
   merchant: Schema.optional(Merchant),
@@ -90,7 +44,7 @@ export class PendingTransaction extends Schema.Class<PendingTransaction>(
   _user: UserId,
   _account: AccountId,
   _connection: ConnectionId,
-  date: AkahuTransactionDate,
+  date: Schema.DateTimeUtcFromString,
   description: Schema.String,
   amount: BigDecimalFromNumber,
 }) {}

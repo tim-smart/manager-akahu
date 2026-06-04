@@ -1,6 +1,4 @@
-import { BigDecimal, Option } from "effect"
-import { type AkahuTransactionDate } from "@app/domain/Akahu"
-import { parseCalendarDate, type CalendarDateParts } from "@app/domain/CalendarDate"
+import { BigDecimal, DateTime, Option } from "effect"
 import {
   buildManagerSuspenseImportDecision,
   type ManagerBankAccountCurrencyImportDecision,
@@ -61,7 +59,7 @@ export type ManagerAkahuSuspenseImportClassification =
 
 export interface ManagerAkahuSuspenseImportClassificationInput {
   readonly bankOrCashAccountKey: string
-  readonly date: AkahuTransactionDate
+  readonly date: DateTime.Utc
   readonly signedAmount: ManagerAkahuDecimalInput
   readonly reference: string
   readonly description: string
@@ -82,7 +80,7 @@ export type ManagerAkahuPendingFingerprintDecision =
 
 export interface ManagerAkahuPendingFingerprintInput {
   readonly akahuAccountId: string
-  readonly date: AkahuTransactionDate
+  readonly date: DateTime.DateTime
   readonly amount: ManagerAkahuDecimalInput
   readonly description: string
 }
@@ -111,7 +109,7 @@ export type ManagerAkahuPendingExactFingerprintDecision =
 
 export interface ManagerAkahuPendingToSettledMatchInput {
   readonly syncRead: ManagerBankOrCashAccountSyncRead
-  readonly settledDate: AkahuTransactionDate
+  readonly settledDate: DateTime.Utc
   readonly settledSignedAmount: ManagerAkahuDecimalInput
   readonly settledDescription: string
   readonly excludedFdxTransactionIds: ReadonlySet<string>
@@ -215,7 +213,7 @@ export const buildAkahuPendingTransactionFingerprint = (
     return { _tag: "unsupported", warning: `Unsupported pending amount: ${amount.input}` }
   }
 
-  const date = input.date.calendarDate
+  const date = DateTime.formatIsoDate(input.date)
   const normalizedDescription = normalizeAkahuTransactionDescription(input.description)
   return {
     _tag: "fingerprint",
@@ -236,7 +234,7 @@ export const classifyManagerAkahuSuspenseImport = (
 
   const managerDecision = buildManagerSuspenseImportDecision({
     bankOrCashAccountKey: input.bankOrCashAccountKey,
-    date: input.date.calendarDate,
+    date: DateTime.formatIsoDate(input.date),
     signedNormalizedAmount: amount.amount,
     reference: input.reference,
     description: input.description,
@@ -324,15 +322,6 @@ const getEntryBankOrCashAccountKey = (
 ): string | null | undefined =>
   entry._tag === "receipt" ? entry.receipt.item.receivedIn : entry.payment.item.paidFrom
 
-const calendarDayNumber = (date: CalendarDateParts): number => {
-  return Date.UTC(date.year, date.month - 1, date.day) / 86_400_000
-}
-
-const parseManagerCalendarDayNumber = (date: string): number | undefined => {
-  const calendarDate = parseCalendarDate(date)
-  return calendarDate === undefined ? undefined : calendarDayNumber(calendarDate)
-}
-
 const getSignedAmountKind = (amount: ManagerLineAmount): ManagerAkahuTransactionKind | "zero" => {
   if (/^-?0+\.00$/.test(amount)) {
     return "zero"
@@ -354,11 +343,7 @@ export const decidePendingToSettledMatch = (
     return { _tag: "unsupported", warning: "Zero settled amounts cannot match pending entries." }
   }
 
-  const settledDate = input.settledDate.calendarDate
-  const settledDay = parseManagerCalendarDayNumber(settledDate)
-  if (settledDay === undefined) {
-    return { _tag: "unsupported", warning: `Unsupported settled date: ${settledDate}` }
-  }
+  const settledDay = dateTimeDayNumber(input.settledDate)
   const dateWindowDays = input.dateWindowDays ?? 3
   const settledDescription = normalizeAkahuTransactionDescription(input.settledDescription)
   const settledAbsoluteAmount = getAbsoluteManagerAkahuAmount(settledAmount.amount)
@@ -396,9 +381,11 @@ export const decidePendingToSettledMatch = (
     }
 
     const entryDate = getEntryItem(entry).date
-    const entryDay =
-      typeof entryDate === "string" ? parseManagerCalendarDayNumber(entryDate) : undefined
-    if (entryDay === undefined || Math.abs(entryDay - settledDay) > dateWindowDays) {
+    const entryDateTime = typeof entryDate === "string" ? DateTime.makeUnsafe(entryDate) : undefined
+    if (
+      entryDateTime === undefined ||
+      Math.abs(dateTimeDayNumber(entryDateTime) - settledDay) > dateWindowDays
+    ) {
       continue
     }
 
@@ -417,4 +404,8 @@ export const decidePendingToSettledMatch = (
   }
 
   return { _tag: "none" }
+}
+
+const dateTimeDayNumber = (date: DateTime.Utc): number => {
+  return DateTime.toEpochMillis(date) / 86_400_000
 }

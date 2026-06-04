@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsgo -b tsconfig.json",
     "ready": "vp fmt && vp lint && pnpm test && pnpm build && pnpm --filter website bundle",
+    "check": "vp check && pnpm build",
     "dev": "vp run --filter website --filter server --parallel --log labeled dev",
     "dev:server": "vp run server#dev",
     "prepare": "vp config && effect-tsgo patch",

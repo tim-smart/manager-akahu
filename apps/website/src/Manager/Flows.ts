@@ -182,13 +182,12 @@ export class ManagerFlows extends Context.Service<
           staleSelections: selections.staleSelections,
         })
       }).pipe(
-        Effect.catch(() =>
-          Effect.succeed(
+        Effect.orElseSucceed(
+          () =>
             new ManagerAkahuSetupError({
               message:
                 "Manager setup information could not be loaded. Try again after checking Manager is available.",
             }),
-          ),
         ),
       )
 

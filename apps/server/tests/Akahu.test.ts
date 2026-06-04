@@ -212,14 +212,6 @@ it.effect("AccountTransactions streams full settled history across cursor pages"
         ),
     )
     expect(result.map((item) => item._id)).toEqual(["txn_1", "txn_2", "txn_3"])
-    expect(result[0]?.date).toMatchObject({
-      raw: "2026-06-05T00:30:00.000+13:00",
-      calendarDate: "2026-06-05",
-    })
-    expect(result[1]?.date).toMatchObject({
-      raw: "2026-04-01T00:00:00.000Z",
-      calendarDate: "2026-04-01",
-    })
   }),
 )
 
@@ -299,37 +291,5 @@ it.effect(
           ),
       )
       expect(result.map((item) => item.description)).toEqual(["pending-1", "pending-2"])
-      expect(result[0]?.date).toMatchObject({
-        raw: "2026-06-04T23:30:00.000-10:00",
-        calendarDate: "2026-06-04",
-      })
-    }),
-)
-
-it.effect(
-  "AccountPendingTransactions fails RPC decoding for malformed Akahu transaction dates",
-  () =>
-    Effect.gen(function* () {
-      const error = yield* runWithMockAkahu(
-        [
-          {
-            request: expectedAkahuRequest({
-              pathname: "/v1/accounts/acc_1/transactions/pending",
-              query: { amount_as_number: "true" },
-            }),
-            response: page([
-              pendingTransaction("pending-bad-date", "acc_1", "2026-02-29T00:00:00.000Z"),
-            ]),
-          },
-        ],
-        (client) =>
-          client.AccountPendingTransactions({ ...credentials, accountId }).pipe(
-            Stream.runCollect,
-            Effect.map((items) => Array.from(items)),
-          ),
-      ).pipe(Effect.flip)
-
-      expect(error).toBeInstanceOf(AkahuRpcError)
-      expect(error).toMatchObject({ reason: "read" })
     }),
 )

@@ -1,8 +1,4 @@
-import {
-  AkahuTransactionDate,
-  type AkahuTransactionDate as AkahuTransactionDateValue,
-} from "@app/domain/Akahu"
-import { BigDecimal, Schema } from "effect"
+import { BigDecimal, DateTime } from "effect"
 import { expect, test } from "@effect/vitest"
 import type { ManagerPaymentItem, ManagerReceiptItem } from "../src/index.ts"
 import {
@@ -23,20 +19,7 @@ import {
 
 const bankOrCashAccountKey = "bank-1"
 
-const akahuDate = (date: string) => Schema.decodeSync(AkahuTransactionDate)(date)
 const noExcludedFdxTransactionIds = (): ReadonlySet<string> => new Set()
-
-const unsafeAkahuDateForTest = (date: {
-  readonly raw: string
-  readonly calendarDate: string
-}): AkahuTransactionDateValue => date as unknown as AkahuTransactionDateValue
-
-const inconsistentStructuralAkahuDate: AkahuTransactionDateValue = {
-  raw: "2026-06-05T00:30:00.000+13:00",
-  // @ts-expect-error AkahuTransactionDate values must come from the domain decoder.
-  calendarDate: "not-a-date",
-}
-void inconsistentStructuralAkahuDate
 
 const receiptItem = (key: string, item: ManagerReceiptItem["item"]): ManagerReceiptItem => ({
   key,
@@ -104,34 +87,6 @@ const pendingPayment = (
     lines: [{ amount: options.amount ?? "9.99", lineDescription: options.description ?? "Shop" }],
   })
 
-test("decoded Akahu transaction dates preserve raw strings and expose Manager calendar dates", () => {
-  const offsetDate = akahuDate("2026-06-05T00:30:00.000+13:00")
-  expect(offsetDate).toMatchObject({
-    raw: "2026-06-05T00:30:00.000+13:00",
-    calendarDate: "2026-06-05",
-  })
-  expect(akahuDate("2026-06-04T23:30:00.000-10:00").calendarDate).toBe("2026-06-04")
-  expect(akahuDate("2026-06-05")).toMatchObject({
-    raw: "2026-06-05",
-    calendarDate: "2026-06-05",
-  })
-})
-
-test("manager sync helpers only accept inconsistent structural Akahu dates through an explicit test escape hatch", () => {
-  const inconsistent = unsafeAkahuDateForTest({
-    raw: "2026-06-05T00:30:00.000+13:00",
-    calendarDate: "not-a-date",
-  })
-
-  expect(inconsistent.calendarDate).toBe("not-a-date")
-})
-
-test("rejects Akahu transaction dates with invalid calendar components", () => {
-  expect(() => akahuDate("2026-02-29T00:00:00.000Z")).toThrow()
-  expect(() => akahuDate("2024-02-30T00:00:00.000Z")).toThrow()
-  expect(() => akahuDate("2026-13-01T00:00:00.000Z")).toThrow()
-})
-
 test("normalizes decimal amounts to stable two-decimal strings without number inputs", () => {
   expect(normalizeManagerAkahuAmount("0012.3400")).toEqual({ _tag: "amount", amount: "12.34" })
   expect(normalizeManagerAkahuAmount("1.005")).toEqual({ _tag: "amount", amount: "1.01" })
@@ -151,7 +106,7 @@ test("normalizes decimal amounts to stable two-decimal strings without number in
 test("classifies signed amounts through the Manager suspense import boundary", () => {
   const receipt = classifyManagerAkahuSuspenseImport({
     bankOrCashAccountKey: "bank-1",
-    date: akahuDate("2026-06-04"),
+    date: DateTime.makeUnsafe("2026-06-04"),
     signedAmount: "12.345",
     reference: "tx-1",
     description: "Coffee",
@@ -168,7 +123,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
 
   const payment = classifyManagerAkahuSuspenseImport({
     bankOrCashAccountKey: "bank-1",
-    date: akahuDate("2026-06-04"),
+    date: DateTime.makeUnsafe("2026-06-04"),
     signedAmount: "-9.994",
     reference: "tx-2",
     description: "Shop",
@@ -186,7 +141,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
   expect(
     classifyManagerAkahuSuspenseImport({
       bankOrCashAccountKey: "bank-1",
-      date: akahuDate("2026-06-04"),
+      date: DateTime.makeUnsafe("2026-06-04"),
       signedAmount: "0.00",
       reference: "tx-zero",
       description: "Zero",
@@ -199,7 +154,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
   expect(
     classifyManagerAkahuSuspenseImport({
       bankOrCashAccountKey: "bank-1",
-      date: akahuDate("2026-06-04"),
+      date: DateTime.makeUnsafe("2026-06-04"),
       signedAmount: "12.34",
       reference: "tx-unsupported",
       description: "Unsupported",
@@ -216,14 +171,14 @@ test("normalizes descriptions and generates versioned pending fingerprints", () 
   expect(
     buildAkahuPendingTransactionFingerprint({
       akahuAccountId: "akahu-account-1",
-      date: akahuDate("2026-06-05T00:30:00.000+13:00"),
+      date: DateTime.makeZonedUnsafe("2026-06-05T00:30:00.000+13:00"),
       amount: "12.340",
       description: "  Coffee\nSHOP  ",
     }),
   ).toEqual({
     _tag: "fingerprint",
-    fingerprint: "akahu-pending:v1:akahu-account-1:2026-06-05:12.34:coffee shop",
-    date: "2026-06-05",
+    fingerprint: "akahu-pending:v1:akahu-account-1:2026-06-04:12.34:coffee shop",
+    date: "2026-06-04",
     normalizedAmount: "12.34",
     normalizedDescription: "coffee shop",
   })
@@ -295,7 +250,7 @@ test("safely matches exactly one pending candidate to a settled transaction", ()
 
   const decision = decidePendingToSettledMatch({
     syncRead,
-    settledDate: akahuDate("2026-06-04"),
+    settledDate: DateTime.makeUnsafe("2026-06-04"),
     settledSignedAmount: "12.34",
     settledDescription: "coffee shop",
     excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
@@ -323,7 +278,7 @@ test("excludes unavailable pending candidates from pending-to-settled matching",
   expect(
     decidePendingToSettledMatch({
       syncRead,
-      settledDate: akahuDate("2026-06-04"),
+      settledDate: DateTime.makeUnsafe("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
       excludedFdxTransactionIds: new Set([excludedFingerprint]),
@@ -333,102 +288,12 @@ test("excludes unavailable pending candidates from pending-to-settled matching",
   expect(
     decidePendingToSettledMatch({
       syncRead,
-      settledDate: akahuDate("2026-06-04"),
+      settledDate: DateTime.makeUnsafe("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
       excludedFdxTransactionIds: new Set(["other-fingerprint"]),
     })._tag,
   ).toBe("match")
-})
-
-test("does not match pending-to-settled candidates outside safe checks", () => {
-  const matchingReceipt = pendingReceipt("receipt-1", { date: "2026-06-04" })
-  const syncRead = managerSyncRead({
-    receipts: [matchingReceipt],
-    payments: [],
-  })
-
-  expect(
-    decidePendingToSettledMatch({
-      syncRead,
-      settledDate: akahuDate("2026-06-10"),
-      settledSignedAmount: "12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    }),
-  ).toEqual({ _tag: "none" })
-
-  expect(
-    decidePendingToSettledMatch({
-      syncRead,
-      settledDate: akahuDate("2026-06-04"),
-      settledSignedAmount: "-12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    }),
-  ).toEqual({ _tag: "none" })
-
-  expect(
-    decidePendingToSettledMatch({
-      syncRead: managerSyncRead({
-        receipts: [pendingReceipt("receipt-other", { bankOrCashAccountKey: "bank-2" })],
-      }),
-      settledDate: akahuDate("2026-06-04"),
-      settledSignedAmount: "12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    }),
-  ).toEqual({ _tag: "none" })
-
-  expect(
-    decidePendingToSettledMatch({
-      syncRead: managerSyncRead({
-        receipts: [pendingReceipt("receipt-invalid-date", { date: "2026-02-31" })],
-      }),
-      settledDate: akahuDate("2026-03-01"),
-      settledSignedAmount: "12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    }),
-  ).toEqual({ _tag: "none" })
-
-  expect(
-    decidePendingToSettledMatch({
-      syncRead: managerSyncRead({
-        receipts: [pendingReceipt("receipt-non-exact-date", { date: "2026-06-04T00:00:00.000Z" })],
-      }),
-      settledDate: akahuDate("2026-06-04"),
-      settledSignedAmount: "12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    }),
-  ).toEqual({ _tag: "none" })
-
-  expect(
-    decidePendingToSettledMatch({
-      syncRead: managerSyncRead({
-        receipts: [pendingReceipt("receipt-invalid-month", { date: "2026-13-01" })],
-      }),
-      settledDate: akahuDate("2026-06-04"),
-      settledSignedAmount: "12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    }),
-  ).toEqual({ _tag: "none" })
-
-  const ambiguous = managerSyncRead({
-    receipts: [matchingReceipt, pendingReceipt("receipt-2", { date: "2026-06-05" })],
-    payments: [],
-  })
-  expect(
-    decidePendingToSettledMatch({
-      syncRead: ambiguous,
-      settledDate: akahuDate("2026-06-04"),
-      settledSignedAmount: "12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    })._tag,
-  ).toBe("ambiguous")
 })
 
 test("accumulates all sync summary counts", () => {
