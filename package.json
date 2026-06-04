@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsgo -b tsconfig.json",
-    "ready": "vp fmt && vp lint && vp run test -r && vp run build -r",
+    "ready": "vp fmt && vp lint && vp run -r test && vp run -w build",
     "dev": "vp run --filter website --filter server --parallel --log labeled dev",
     "dev:server": "vp run server#dev",
     "prepare": "vp config && effect-tsgo patch"

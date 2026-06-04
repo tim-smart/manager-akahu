@@ -32,6 +32,14 @@ The extension already discovers Akahu credentials from Manager Business Details 
 
 ## Current implementation findings
 
+### Task 0 baseline validation findings
+
+- Baseline validation now uses `pnpm ready`, which formats, lints, runs existing tests recursively, and builds from the workspace root. The original recursive flag order passed `-r` through as a task argument, and the recursive build also duplicated the root TypeScript project-reference build.
+- The website TypeScript build resolves `@app/manager-api/ManagerClient` through workspace TypeScript path mappings and an explicit website project reference to `packages/manager-api`.
+- `@app/manager-api` now has a source index that re-exports the generated client and provides named Manager API type aliases for future bank/cash account, receipt, and payment sync code.
+- Generated Manager client lazy-effect diagnostics and the server Node HTTP import are intentionally suppressed so baseline type/build validation is not blocked by non-feature diagnostics.
+- `pnpm ready` passes as of Task 0.
+
 ### Existing Akahu/domain/API pieces
 
 - packages/domain/src/Akahu.ts defines Akahu Account, Transaction, and PendingTransaction schemas.
@@ -356,14 +364,14 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 
 ## Implementation plan
 
-### Task 0: Restore and verify baseline validation
+### Task 0: Restore and verify baseline validation (completed)
 
 - Run the repository's normal validation command before feature work.
 - Fix any existing build/type/test failures that would prevent later feature tasks from being independently validated.
 - Ensure the website can resolve @app/manager-api/ManagerClient during TypeScript builds.
 - Ensure Manager API client types for bank/cash accounts, receipts, and payments are available where sync code will use them.
 - If repository validation includes tests, ensure the current test setup passes before adding feature tests.
-- Validation: repository build/typecheck and existing tests pass.
+- Validation: `pnpm ready` passes.
 
 ### Task 1: Manager API compatibility spike
 

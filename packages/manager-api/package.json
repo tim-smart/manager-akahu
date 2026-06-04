@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.json",
-    "check": "vp check"
+    "check": "vp check",
+    "test": "vp test"
   },
   "devDependencies": {
     "@effect/platform-node": "catalog:",

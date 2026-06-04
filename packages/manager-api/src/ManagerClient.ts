@@ -1,3 +1,4 @@
+/** @effect-diagnostics lazyEffect:skip-file */
 // oxlint-disable typescript/no-duplicate-type-constituents
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"

@@ -11,6 +11,11 @@
     "strict": true,
     "resolveJsonModule": true,
     "noUnusedLocals": true,
+    "paths": {
+      "@app/domain/*": ["./packages/domain/src/*"],
+      "@app/manager-api": ["./packages/manager-api/src/index.ts"],
+      "@app/manager-api/*": ["./packages/manager-api/src/*"]
+    },
     "plugins": [
       {
         "name": "@effect/language-service",
