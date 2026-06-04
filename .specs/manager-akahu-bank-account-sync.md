@@ -430,6 +430,13 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Prefer inlining or deleting `ManagerSuspensePayloadInput` if that makes the flow more direct. Do not add new public API or test-only wrappers; keep public behavior and the focused compatibility tests unchanged.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
+### Task 1 follow-up review follow-up audit follow-up: Collapse the private suspense payload construction layer
+
+- The completed boundary-tightening change fixed the spread leak and is behaviorally acceptable, but it left a private `ManagerSuspensePayloadInput` plus nearly identical private receipt/payment constructors in `packages/manager-api/src/ManagerCompatibility.ts`. Before later sync code depends on this shape, do one more code-judo pass to see whether that private layer can disappear entirely.
+- Prefer building one shared local base value/line after importability, zero-amount handling, and absolute-amount normalization, then branch only for the Manager-specific account field (`receivedIn` for receipts versus `paidFrom` for payments). If this makes the module more direct, delete `ManagerSuspensePayloadInput` and any private helper that is only passing fields through.
+- Keep the public `buildManagerSuspenseImportDecision` API, receipt/payment result payload contracts, omission invariants, and existing tests' behavior unchanged. Do not add new public API, test-only wrappers, or generic exact-object machinery unless it clearly removes more complexity than it adds.
+- Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
+
 ### Task 2: Pagination foundations
 
 - Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present.
