@@ -489,6 +489,11 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Keep the guard local to `packages/manager-api/tests/ManagerBatchPagination.test.ts`, with no runtime page-size configuration and no test-only production knob. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
+### Task 2 follow-up review follow-up audit follow-up review: Accept direct Manager page-size guard (completed)
+
+- Deep review found no actionable structural follow-up for the direct page-size guard implementation. Keep `ManagerBatchReadInputHasNoPublicPageSize` as a local type-only assertion, keep `publicSyncReadInput` typed against `ManagerBankOrCashAccountBatchReadInput`, and avoid adding runtime page-size configuration or test-only production knobs. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` passing.
+
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary (completed)
 
 - Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly. (completed)
