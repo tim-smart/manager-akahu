@@ -61,7 +61,6 @@ export interface ManagerAkahuSuspenseImportClassificationInput {
   readonly bankOrCashAccountKey: string
   readonly date: DateTime.DateTime
   readonly signedAmount: ManagerAkahuDecimalInput
-  readonly reference: string
   readonly description: string
   readonly fdxTransactionId: string
   readonly clearance: ManagerImportClearance
@@ -242,7 +241,6 @@ export const classifyManagerAkahuSuspenseImport = (
     bankOrCashAccountKey: input.bankOrCashAccountKey,
     date: DateTime.formatIsoDate(input.date),
     signedNormalizedAmount: amount.amount,
-    reference: input.reference,
     description: input.description,
     fdxTransactionId: input.fdxTransactionId,
     clearance: input.clearance,

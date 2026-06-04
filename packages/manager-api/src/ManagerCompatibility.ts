@@ -20,7 +20,6 @@ export interface ManagerSuspenseImportDecisionInput {
   readonly bankOrCashAccountKey: string
   readonly date: string
   readonly signedNormalizedAmount: ManagerLineAmount
-  readonly reference: string
   readonly description: string
   readonly fdxTransactionId: string
   readonly clearance: ManagerImportClearance
@@ -38,7 +37,6 @@ export type ManagerSuspenseLine = Pick<ManagerReceiptCreateLine, "amount" | "lin
 
 export interface ManagerSuspenseReceiptValue extends ManagerReceiptCreate {
   readonly date: NonNullable<ManagerReceiptCreate["date"]>
-  readonly reference: NonNullable<ManagerReceiptCreate["reference"]>
   readonly receivedIn: NonNullable<ManagerReceiptCreate["receivedIn"]>
   readonly cleared: NonNullable<ManagerReceiptCreate["cleared"]>
   readonly description: NonNullable<ManagerReceiptCreate["description"]>
@@ -54,7 +52,6 @@ export interface ManagerSuspenseReceiptPayload extends ManagerPostReceipt {
 
 export interface ManagerSuspensePaymentValue extends ManagerPaymentCreate {
   readonly date: NonNullable<ManagerPaymentCreate["date"]>
-  readonly reference: NonNullable<ManagerPaymentCreate["reference"]>
   readonly paidFrom: NonNullable<ManagerPaymentCreate["paidFrom"]>
   readonly cleared: NonNullable<ManagerPaymentCreate["cleared"]>
   readonly description: NonNullable<ManagerPaymentCreate["description"]>
@@ -129,7 +126,6 @@ export const buildManagerSuspenseImportDecision = (
   } satisfies ManagerSuspenseLine
   const baseValue = {
     date: input.date,
-    reference: input.reference,
     ...buildManagerClearanceFields(input.clearance),
     description: input.description,
     fdxTransactionId: input.fdxTransactionId,
@@ -142,6 +138,7 @@ export const buildManagerSuspenseImportDecision = (
       payload: {
         value: {
           ...baseValue,
+          automaticReference: true,
           paidFrom: input.bankOrCashAccountKey,
         },
       } satisfies ManagerSuspensePaymentPayload,
@@ -153,6 +150,7 @@ export const buildManagerSuspenseImportDecision = (
     payload: {
       value: {
         ...baseValue,
+        automaticReference: true,
         receivedIn: input.bankOrCashAccountKey,
       },
     } satisfies ManagerSuspenseReceiptPayload,
