@@ -59,7 +59,7 @@ export type ManagerAkahuSuspenseImportClassification =
 
 export interface ManagerAkahuSuspenseImportClassificationInput {
   readonly bankOrCashAccountKey: string
-  readonly date: DateTime.Utc
+  readonly date: DateTime.DateTime
   readonly signedAmount: ManagerAkahuDecimalInput
   readonly reference: string
   readonly description: string
@@ -109,7 +109,7 @@ export type ManagerAkahuPendingExactFingerprintDecision =
 
 export interface ManagerAkahuPendingToSettledMatchInput {
   readonly syncRead: ManagerBankOrCashAccountSyncRead
-  readonly settledDate: DateTime.Utc
+  readonly settledDate: DateTime.DateTime
   readonly settledSignedAmount: ManagerAkahuDecimalInput
   readonly settledDescription: string
   readonly excludedFdxTransactionIds: ReadonlySet<string>
@@ -422,6 +422,6 @@ export const decidePendingToSettledMatch = (
   return { _tag: "none" }
 }
 
-const dateTimeDayNumber = (date: DateTime.Utc): number => {
+const dateTimeDayNumber = (date: DateTime.DateTime): number => {
   return DateTime.toEpochMillis(date) / 86_400_000
 }

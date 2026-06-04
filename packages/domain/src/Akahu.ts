@@ -22,12 +22,20 @@ export type AccountId = typeof AccountId.Type
 export const UserId = Schema.String.pipe(Schema.brand("akahu/UserId"))
 export type UserId = typeof UserId.Type
 
+const NZTimeZone = DateTime.zoneMakeNamedUnsafe("Pacific/Auckland")
+const DateTimeNZ = Schema.DateTimeUtcFromString.pipe(
+  Schema.decodeTo(Schema.DateTimeZoned, {
+    decode: SchemaGetter.transform(DateTime.setZone(NZTimeZone)),
+    encode: SchemaGetter.transform(DateTime.toUtc),
+  }),
+)
+
 export class Transaction extends Schema.Class<Transaction>("akahu/Transaction")({
   _id: Schema.String,
   _account: AccountId,
   _user: UserId,
   _connection: ConnectionId,
-  date: Schema.DateTimeUtcFromString,
+  date: DateTimeNZ,
   description: Schema.String,
   amount: BigDecimalFromNumber,
   merchant: Schema.optional(Merchant),
@@ -44,7 +52,7 @@ export class PendingTransaction extends Schema.Class<PendingTransaction>(
   _user: UserId,
   _account: AccountId,
   _connection: ConnectionId,
-  date: Schema.DateTimeUtcFromString,
+  date: DateTimeNZ,
   description: Schema.String,
   amount: BigDecimalFromNumber,
 }) {}
