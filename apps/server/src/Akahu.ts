@@ -1,5 +1,5 @@
-import { Context, Effect, Layer, Redacted } from "effect"
-import { Account, AkahuApi } from "@app/domain/Akahu"
+import { Context, DateTime, Effect, Layer, Redacted } from "effect"
+import { Account, AccountId, AkahuApi, PendingTransaction, Transaction } from "@app/domain/Akahu"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
 import { NodeHttpClient } from "@effect/platform-node"
@@ -12,10 +12,17 @@ export class AkahuCredentials extends Context.Service<
   }
 >()("server/AkahuCredentials") {}
 
+// @effect-diagnostics-next-line leakingRequirements:off
 export class Akahu extends Context.Service<
   Akahu,
   {
     readonly accounts: Effect.Effect<ReadonlyArray<Account>, never, AkahuCredentials>
+    transactions(options: {
+      readonly accountId: AccountId
+    }): Effect.Effect<ReadonlyArray<Transaction>, never, AkahuCredentials>
+    pendingTransactions(options: {
+      readonly accountId: AccountId
+    }): Effect.Effect<ReadonlyArray<PendingTransaction>, never, AkahuCredentials>
   }
 >()("server/Akahu") {
   static readonly layer = Layer.effect(
@@ -41,6 +48,8 @@ export class Akahu extends Context.Service<
         httpClient,
       })
 
+      const start = (yield* DateTime.now).pipe(DateTime.subtract({ days: 30 }))
+
       return Akahu.of({
         accounts: akahu.accounts
           .list({
@@ -50,6 +59,26 @@ export class Akahu extends Context.Service<
             Effect.map((r) => r.items),
             Effect.orDie,
           ),
+        transactions: ({ accountId }) =>
+          akahu.transactions
+            .list({
+              params: { accountId },
+              query: { start },
+            })
+            .pipe(
+              Effect.map((r) => r.items),
+              Effect.orDie,
+            ),
+        pendingTransactions: ({ accountId }) =>
+          akahu.transactions
+            .pending({
+              params: { accountId },
+              query: { start, amount_as_number: "true" },
+            })
+            .pipe(
+              Effect.map((r) => r.items),
+              Effect.orDie,
+            ),
       })
     }),
   ).pipe(Layer.provide(NodeHttpClient.layerUndici))

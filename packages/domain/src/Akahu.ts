@@ -15,8 +15,12 @@ export const ConnectionId: Schema.refine<
   string & Brand.Brand<"akahu/ConnectionId">,
   Schema.String
 > = Schema.String.pipe(Schema.brand("akahu/ConnectionId"))
+
 export const AccountId = Schema.String.pipe(Schema.brand("akahu/AccountId"))
+export type AccountId = typeof AccountId.Type
+
 export const UserId = Schema.String.pipe(Schema.brand("akahu/UserId"))
+export type UserId = typeof UserId.Type
 
 export class Transaction extends Schema.Class<Transaction>("akahu/Transaction")({
   _id: Schema.String,

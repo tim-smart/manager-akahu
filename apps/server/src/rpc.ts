@@ -15,6 +15,20 @@ export const ApiHandlers = ApiRpcs.toLayer(
             userToken: akahuUserToken,
           }),
         ),
+      AccountTransactions: ({ akahuAppToken, akahuUserToken, accountId }) =>
+        akahu.transactions({ accountId }).pipe(
+          Effect.provideService(AkahuCredentials, {
+            appToken: akahuAppToken,
+            userToken: akahuUserToken,
+          }),
+        ),
+      AccountPendingTransactions: ({ akahuAppToken, akahuUserToken, accountId }) =>
+        akahu.pendingTransactions({ accountId }).pipe(
+          Effect.provideService(AkahuCredentials, {
+            appToken: akahuAppToken,
+            userToken: akahuUserToken,
+          }),
+        ),
     })
   }),
 ).pipe(Layer.provide(Akahu.layer))
