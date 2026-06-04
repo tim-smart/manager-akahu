@@ -15,6 +15,9 @@
     "build": "tsc -b tsconfig.json",
     "check": "vp check"
   },
+  "dependencies": {
+    "@app/domain": "workspace:*"
+  },
   "devDependencies": {
     "@effect/platform-node": "catalog:",
     "@tim-smart/openapi-gen": "catalog:",

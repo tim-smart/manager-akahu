@@ -213,6 +213,27 @@ it.effect("AccountTransactions streams all settled transactions across cursor pa
   }),
 )
 
+it.effect("AccountTransactions fails RPC decoding for malformed Akahu transaction dates", () =>
+  Effect.gen(function* () {
+    const error = yield* runWithMockAkahu(
+      [
+        {
+          request: expectedAkahuRequest({ pathname: "/v1/accounts/acc_1/transactions" }),
+          response: page([settledTransaction("txn-bad-date", "acc_1", "2026-02-31T00:00:00.000Z")]),
+        },
+      ],
+      (client) =>
+        client.AccountTransactions({ ...credentials, accountId }).pipe(
+          Stream.runCollect,
+          Effect.map((items) => Array.from(items)),
+        ),
+    ).pipe(Effect.flip)
+
+    expect(error).toBeInstanceOf(AkahuRpcError)
+    expect(error).toMatchObject({ reason: "read" })
+  }),
+)
+
 it.effect("AccountTransactions preserves retryable Akahu read failures as typed RPC errors", () =>
   Effect.gen(function* () {
     const error = yield* runWithMockAkahu(
@@ -269,5 +290,31 @@ it.effect(
       )
       expect(result.map((item) => item.description)).toEqual(["pending-1", "pending-2"])
       expect(result[0]?.date).toBe("2026-06-04T23:30:00.000-10:00")
+    }),
+)
+
+it.effect(
+  "AccountPendingTransactions fails RPC decoding for malformed Akahu transaction dates",
+  () =>
+    Effect.gen(function* () {
+      const error = yield* runWithMockAkahu(
+        [
+          {
+            request: expectedAkahuRequest({
+              pathname: "/v1/accounts/acc_1/transactions/pending",
+              query: { amount_as_number: "true" },
+            }),
+            response: page([pendingTransaction("pending-bad-date", "acc_1", "not-a-date")]),
+          },
+        ],
+        (client) =>
+          client.AccountPendingTransactions({ ...credentials, accountId }).pipe(
+            Stream.runCollect,
+            Effect.map((items) => Array.from(items)),
+          ),
+      ).pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(AkahuRpcError)
+      expect(error).toMatchObject({ reason: "read" })
     }),
 )

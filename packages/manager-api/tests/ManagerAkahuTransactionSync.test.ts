@@ -1,4 +1,5 @@
-import { BigDecimal } from "effect"
+import { AkahuTransactionDate } from "@app/domain/Akahu"
+import { BigDecimal, Schema } from "effect"
 import { expect, test } from "@effect/vitest"
 import type { ManagerPaymentItem, ManagerReceiptItem } from "../src/index.ts"
 import {
@@ -19,6 +20,8 @@ import {
 } from "../src/index.ts"
 
 const bankOrCashAccountKey = "bank-1"
+
+const akahuDate = (date: string) => Schema.decodeSync(AkahuTransactionDate)(date)
 
 const receiptItem = (key: string, item: ManagerReceiptItem["item"]): ManagerReceiptItem => ({
   key,
@@ -87,9 +90,9 @@ const pendingPayment = (
   })
 
 test("formats Manager dates by preserving Akahu string calendar dates", () => {
-  expect(formatManagerAkahuDate({ date: "2026-06-05T00:30:00.000+13:00" })).toBe("2026-06-05")
-  expect(formatManagerAkahuDate({ date: "2026-06-04T23:30:00.000-10:00" })).toBe("2026-06-04")
-  expect(formatManagerAkahuDate({ date: "2026-06-05" })).toBe("2026-06-05")
+  expect(formatManagerAkahuDate(akahuDate("2026-06-05T00:30:00.000+13:00"))).toBe("2026-06-05")
+  expect(formatManagerAkahuDate(akahuDate("2026-06-04T23:30:00.000-10:00"))).toBe("2026-06-04")
+  expect(formatManagerAkahuDate(akahuDate("2026-06-05"))).toBe("2026-06-05")
 })
 
 test("normalizes decimal amounts to stable two-decimal strings without number inputs", () => {
@@ -111,7 +114,7 @@ test("normalizes decimal amounts to stable two-decimal strings without number in
 test("classifies signed amounts through the Manager suspense import boundary", () => {
   const receipt = classifyManagerAkahuSuspenseImport({
     bankOrCashAccountKey: "bank-1",
-    date: { date: "2026-06-04" },
+    date: akahuDate("2026-06-04"),
     signedAmount: "12.345",
     reference: "tx-1",
     description: "Coffee",
@@ -128,7 +131,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
 
   const payment = classifyManagerAkahuSuspenseImport({
     bankOrCashAccountKey: "bank-1",
-    date: { date: "2026-06-04" },
+    date: akahuDate("2026-06-04"),
     signedAmount: "-9.994",
     reference: "tx-2",
     description: "Shop",
@@ -146,7 +149,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
   expect(
     classifyManagerAkahuSuspenseImport({
       bankOrCashAccountKey: "bank-1",
-      date: { date: "2026-06-04" },
+      date: akahuDate("2026-06-04"),
       signedAmount: "0.00",
       reference: "tx-zero",
       description: "Zero",
@@ -159,7 +162,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
   expect(
     classifyManagerAkahuSuspenseImport({
       bankOrCashAccountKey: "bank-1",
-      date: { date: "2026-06-04" },
+      date: akahuDate("2026-06-04"),
       signedAmount: "12.34",
       reference: "tx-unsupported",
       description: "Unsupported",
@@ -176,7 +179,7 @@ test("normalizes descriptions and generates versioned pending fingerprints", () 
   expect(
     buildAkahuPendingTransactionFingerprint({
       akahuAccountId: "akahu-account-1",
-      date: { date: "2026-06-05T00:30:00.000+13:00" },
+      date: akahuDate("2026-06-05T00:30:00.000+13:00"),
       amount: "12.340",
       description: "  Coffee\nSHOP  ",
     }),
@@ -255,7 +258,7 @@ test("safely matches exactly one pending candidate to a settled transaction", ()
 
   const decision = decidePendingToSettledMatch({
     syncRead,
-    settledDate: { date: "2026-06-04" },
+    settledDate: akahuDate("2026-06-04"),
     settledSignedAmount: "12.34",
     settledDescription: "coffee shop",
   })
@@ -276,7 +279,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
   expect(
     decidePendingToSettledMatch({
       syncRead,
-      settledDate: { date: "2026-06-10" },
+      settledDate: akahuDate("2026-06-10"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
     }),
@@ -285,7 +288,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
   expect(
     decidePendingToSettledMatch({
       syncRead,
-      settledDate: { date: "2026-06-04" },
+      settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "-12.34",
       settledDescription: "coffee shop",
     }),
@@ -296,7 +299,18 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       syncRead: managerSyncRead({
         receipts: [pendingReceipt("receipt-other", { bankOrCashAccountKey: "bank-2" })],
       }),
-      settledDate: { date: "2026-06-04" },
+      settledDate: akahuDate("2026-06-04"),
+      settledSignedAmount: "12.34",
+      settledDescription: "coffee shop",
+    }),
+  ).toEqual({ _tag: "none" })
+
+  expect(
+    decidePendingToSettledMatch({
+      syncRead: managerSyncRead({
+        receipts: [pendingReceipt("receipt-invalid-date", { date: "2026-02-31" })],
+      }),
+      settledDate: akahuDate("2026-03-01"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
     }),
@@ -309,7 +323,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
   expect(
     decidePendingToSettledMatch({
       syncRead: ambiguous,
-      settledDate: { date: "2026-06-04" },
+      settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
     })._tag,

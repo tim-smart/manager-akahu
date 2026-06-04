@@ -211,6 +211,10 @@ importers:
         version: 5.9.3
 
   packages/manager-api:
+    dependencies:
+      '@app/domain':
+        specifier: workspace:*
+        version: link:../domain
     devDependencies:
       '@effect/platform-node':
         specifier: 'catalog:'
