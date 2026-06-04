@@ -438,6 +438,13 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Keep the public `buildManagerSuspenseImportDecision` API, receipt/payment result payload contracts, omission invariants, and existing tests' behavior unchanged. Do not add new public API, test-only wrappers, or generic exact-object machinery unless it clearly removes more complexity than it adds.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
+### Task 1 follow-up review follow-up audit follow-up review: Code quality audit (completed)
+
+- Deep code-quality review found no blocker-level structural follow-up for the collapsed suspense payload construction layer. The current `buildManagerSuspenseImportDecision` implementation deletes the private pass-through layer, builds one shared base value/line after skip and amount-normalization decisions, and branches only for the Manager account field.
+- Keep later sync orchestration routed through `buildManagerSuspenseImportDecision`; do not reintroduce receipt/payment classification, zero-amount checks, or foreign-currency importability branching in higher-level sync flows.
+- Residual guardrail: `ManagerLineAmount` is still a plain string until the later decimal-normalization helper exists. When Task 4 introduces that helper, make this boundary more explicit if doing so removes ambiguity without adding wrapper noise.
+- Review validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
+
 ### Task 2: Pagination foundations
 
 - Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present.
