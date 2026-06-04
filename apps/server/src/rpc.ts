@@ -33,8 +33,6 @@ export const ApiHandlersBase = ApiRpcs.toLayer(
   }),
 )
 
-export const ApiHandlers = ApiHandlersBase.pipe(Layer.provide(Akahu.layer))
-
 export const RpcRouteBase = RpcServer.layerHttp({
   group: ApiRpcs,
   path: "/rpc",

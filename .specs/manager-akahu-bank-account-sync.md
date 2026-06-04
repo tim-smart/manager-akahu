@@ -110,6 +110,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 2 Manager page-size guard follow-up made the pagination test guard direct: `publicSyncReadInput` now satisfies the real `ManagerBankOrCashAccountBatchReadInput` contract, while a separate source-local no-emit assertion fails typechecking if `"pageSize"` becomes a public input key.
 - Task 2 Akahu boundary seam follow-up renamed the negative `ApiHandlersWithoutAkahu` export to neutral `ApiHandlersBase`, added `RpcRouteBase`, and made `Akahu.layer` the canonical Akahu service layer requiring `HttpClient`. The live server now provides `NodeHttpClient.layerUndici` at `apps/server/src/main.ts` instead of exposing a production `layerWithHttpClient` helper.
 - Akahu boundary RPC tests now use an ordered expected request/response table in the mock HTTP client. Each Akahu page request asserts method, path, full query object, and credential headers before returning the associated mocked response, preserving multi-page coverage for accounts, settled transactions, and pending transactions with `amount_as_number=true` on every pending page.
+- Task 2 Akahu RPC composition follow-up removed the unused live `ApiHandlers` export from `apps/server/src/rpc.ts`. `ApiHandlersBase` remains as the neutral mock-Akahu test seam, while `RpcRoute` is the single live route composition that provides `Akahu.layer`.
 
 ## Requirements
 
@@ -511,11 +512,11 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the important coverage from the completed task: RPC-level `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` must still return all items across cursor pages; pending transaction pages must still assert `amount_as_number=true`; `paginatedAkahuItems` must remain private. (completed)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass.
 
-### Task 2 follow-up review follow-up: Collapse duplicate Akahu live RPC composition
+### Task 2 follow-up review follow-up: Collapse duplicate Akahu live RPC composition (completed)
 
-- Collapse the remaining duplicated Akahu live-layer composition in `apps/server/src/rpc.ts`. The current seam cleanup leaves both `ApiHandlers = ApiHandlersBase.pipe(Layer.provide(Akahu.layer))` and `RpcRoute = RpcRouteBase.pipe(Layer.provide(Akahu.layer))`, even though `ApiHandlers` appears unused in the repo. This gives future callers two live surfaces that independently compose the same Akahu service layer.
-- Prefer one canonical live composition path: either remove the unused live `ApiHandlers` export and keep `RpcRouteBase`/`RpcRoute` as the route boundary, or define `RpcRoute` in terms of the live `ApiHandlers` so `Akahu.layer` is provided in exactly one place.
-- Preserve `ApiHandlersBase` only if tests still need the handler-level mock-Akahu seam. Do not reintroduce negative/test-only production names or an HTTP-client-specific Akahu helper.
+- Collapse the remaining duplicated Akahu live-layer composition in `apps/server/src/rpc.ts`. The current seam cleanup leaves both `ApiHandlers = ApiHandlersBase.pipe(Layer.provide(Akahu.layer))` and `RpcRoute = RpcRouteBase.pipe(Layer.provide(Akahu.layer))`, even though `ApiHandlers` appears unused in the repo. This gives future callers two live surfaces that independently compose the same Akahu service layer. (completed)
+- Prefer one canonical live composition path: either remove the unused live `ApiHandlers` export and keep `RpcRouteBase`/`RpcRoute` as the route boundary, or define `RpcRoute` in terms of the live `ApiHandlers` so `Akahu.layer` is provided in exactly one place. (completed by removing the unused live `ApiHandlers` export)
+- Preserve `ApiHandlersBase` only if tests still need the handler-level mock-Akahu seam. Do not reintroduce negative/test-only production names or an HTTP-client-specific Akahu helper. (completed; `apps/server/tests/Akahu.test.ts` still uses `ApiHandlersBase` with a mock Akahu HTTP client)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass.
 
 ### Task 3: Setup-state flow, atom, and minimal setup UI
