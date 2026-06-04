@@ -110,6 +110,72 @@ const paymentItem = (key: string, fdxTransactionId: string): ItemOfPayment => ({
   _actions: null,
 })
 
+const pendingReceiptItem = (
+  key: string,
+  options: {
+    readonly fdxTransactionId?: string | undefined
+    readonly date?: string | undefined
+    readonly amount?: string | undefined
+    readonly description?: string | undefined
+    readonly bankOrCashAccountKey?: string | undefined
+  } = {},
+): ItemOfReceipt => {
+  const description = options.description ?? "Coffee Shop"
+  const fdxTransactionId =
+    options.fdxTransactionId ??
+    `akahu-pending:v1:akahu-checking:${options.date ?? "2026-06-05"}:${
+      options.amount ?? "12.34"
+    }:${description.toLowerCase()}`
+
+  return {
+    key,
+    item: {
+      date: options.date ?? "2026-06-05",
+      reference: fdxTransactionId,
+      cleared: 1,
+      description,
+      fdxTransactionId,
+      lines: [{ amount: options.amount ?? "12.34", lineDescription: description }],
+      receivedIn: options.bankOrCashAccountKey ?? "manager-checking",
+    },
+    _links: null,
+    _actions: null,
+  }
+}
+
+const pendingPaymentItem = (
+  key: string,
+  options: {
+    readonly fdxTransactionId?: string | undefined
+    readonly date?: string | undefined
+    readonly amount?: string | undefined
+    readonly description?: string | undefined
+    readonly bankOrCashAccountKey?: string | undefined
+  } = {},
+): ItemOfPayment => {
+  const description = options.description ?? "Book Store"
+  const fdxTransactionId =
+    options.fdxTransactionId ??
+    `akahu-pending:v1:akahu-checking:${options.date ?? "2026-06-05"}:${
+      options.amount ?? "-7.89"
+    }:${description.toLowerCase()}`
+
+  return {
+    key,
+    item: {
+      date: options.date ?? "2026-06-05",
+      reference: fdxTransactionId,
+      cleared: 1,
+      description,
+      fdxTransactionId,
+      lines: [{ amount: options.amount ?? "7.89", lineDescription: description }],
+      paidFrom: options.bankOrCashAccountKey ?? "manager-checking",
+    },
+    _links: null,
+    _actions: null,
+  }
+}
+
 const existingReceiptItems = (
   fdxTransactionIds: ReadonlyArray<string>,
 ): ReadonlyArray<ItemOfReceipt> =>
@@ -652,6 +718,177 @@ it.effect("repeats pending sync without creating duplicate Manager entries", () 
       receiptsCreated: 0,
       pendingCreated: 0,
       pendingUpdated: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect(
+  "replaces exactly one safe pending receipt or payment with a settled Manager update",
+  () =>
+    Effect.gen(function* () {
+      const managerAccount = linkedAccount()
+      const { client, receiptPayloads, paymentPayloads, receiptPutPayloads, paymentPutPayloads } =
+        makeMockClient({
+          receiptsByAccount: {
+            "manager-checking": [
+              pendingReceiptItem("receipt-existing-pending", {
+                date: "2026-06-03",
+                amount: "12.340",
+                description: "Coffee  Shop",
+              }),
+            ],
+          },
+          paymentsByAccount: {
+            "manager-checking": [
+              pendingPaymentItem("payment-existing-pending", {
+                date: "2026-06-06",
+                amount: "7.890",
+                description: "Book  Store",
+              }),
+            ],
+          },
+        })
+
+      const summary = yield* runTransactionSync({
+        accounts: [managerAccount],
+        client,
+        transactionsByAccount: {
+          [accountId]: [
+            settledTransaction({
+              id: "tx-settled-coffee",
+              amount: "12.34",
+              merchantName: "coffee shop",
+            }),
+            settledTransaction({
+              id: "tx-settled-book",
+              amount: "-7.89",
+              merchantName: "book store",
+            }),
+          ],
+        },
+      })
+
+      expect(receiptPayloads).toEqual([])
+      expect(paymentPayloads).toEqual([])
+      expect(receiptPutPayloads).toEqual([
+        {
+          key: "receipt-existing-pending",
+          value: {
+            date: "2026-06-05",
+            reference: "tx-settled-coffee",
+            cleared: 0,
+            description: "coffee shop",
+            fdxTransactionId: "tx-settled-coffee",
+            lines: [{ amount: "12.34", lineDescription: "coffee shop" }],
+            receivedIn: "manager-checking",
+          },
+        },
+      ])
+      expect(paymentPutPayloads).toEqual([
+        {
+          key: "payment-existing-pending",
+          value: {
+            date: "2026-06-05",
+            reference: "tx-settled-book",
+            cleared: 0,
+            description: "book store",
+            fdxTransactionId: "tx-settled-book",
+            lines: [{ amount: "7.89", lineDescription: "book store" }],
+            paidFrom: "manager-checking",
+          },
+        },
+      ])
+      expect(summary.overall).toMatchObject({
+        settledFetched: 2,
+        receiptsCreated: 0,
+        paymentsCreated: 0,
+        pendingSettled: 2,
+        warnings: 0,
+        errors: 0,
+      })
+    }),
+)
+
+it.effect("creates settled entries when pending candidates are ambiguous or non-matching", () =>
+  Effect.gen(function* () {
+    const ambiguousAccount = linkedAccount()
+    const ambiguousClient = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [
+          pendingReceiptItem("receipt-pending-1"),
+          pendingReceiptItem("receipt-pending-2", {
+            fdxTransactionId: "akahu-pending:v1:akahu-checking:2026-06-04:12.34:coffee shop",
+            date: "2026-06-04",
+          }),
+        ],
+      },
+    })
+
+    const ambiguousSummary = yield* runTransactionSync({
+      accounts: [ambiguousAccount],
+      client: ambiguousClient.client,
+      transactionsByAccount: {
+        [accountId]: [
+          settledTransaction({
+            id: "tx-ambiguous",
+            amount: "12.34",
+            merchantName: "Coffee Shop",
+          }),
+        ],
+      },
+    })
+
+    expect(ambiguousClient.receiptPutPayloads).toEqual([])
+    expect(
+      ambiguousClient.receiptPayloads.map((payload) => payload.value.fdxTransactionId),
+    ).toEqual(["tx-ambiguous"])
+    expect(ambiguousSummary.accounts[0]?.warnings).toEqual([
+      "Found 2 possible pending entries for settled transaction replacement.",
+    ])
+    expect(ambiguousSummary.overall).toMatchObject({
+      settledFetched: 1,
+      receiptsCreated: 1,
+      pendingSettled: 0,
+      warnings: 1,
+      errors: 0,
+    })
+
+    const nonMatchingClient = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [
+          pendingReceiptItem("receipt-non-matching", {
+            amount: "9.99",
+            description: "Different Shop",
+          }),
+        ],
+      },
+    })
+
+    const nonMatchingSummary = yield* runTransactionSync({
+      accounts: [linkedAccount()],
+      client: nonMatchingClient.client,
+      transactionsByAccount: {
+        [accountId]: [
+          settledTransaction({
+            id: "tx-non-matching",
+            amount: "12.34",
+            merchantName: "Coffee Shop",
+          }),
+        ],
+      },
+    })
+
+    expect(nonMatchingClient.receiptPutPayloads).toEqual([])
+    expect(
+      nonMatchingClient.receiptPayloads.map((payload) => payload.value.fdxTransactionId),
+    ).toEqual(["tx-non-matching"])
+    expect(nonMatchingSummary.accounts[0]?.warnings).toEqual([])
+    expect(nonMatchingSummary.overall).toMatchObject({
+      settledFetched: 1,
+      receiptsCreated: 1,
+      pendingSettled: 0,
+      warnings: 0,
       errors: 0,
     })
   }),

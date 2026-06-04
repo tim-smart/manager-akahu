@@ -7,6 +7,7 @@ import {
   buildAkahuPendingTransactionFingerprint,
   classifyManagerAkahuSuspenseImport,
   decidePendingExactFingerprint,
+  decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
@@ -342,6 +343,40 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
     switch (classification._tag) {
       case "receipt":
       case "payment":
+        {
+          const pendingReplacementDecision = decidePendingToSettledMatch({
+            syncRead,
+            settledDate: transaction.date,
+            settledSignedAmount: transaction.amount,
+            settledDescription: getAkahuTransactionDescription(transaction),
+          })
+
+          if (pendingReplacementDecision._tag === "match") {
+            accountState = yield* updateManagerAkahuSettledPendingReplacement({
+              state: state.accountState,
+              client,
+              fdxTransactionId: transaction._id,
+              classification,
+              entry: pendingReplacementDecision.entry,
+            })
+            return continueManagerAkahuSettledPhase({ ...state, accountState })
+          }
+
+          if (pendingReplacementDecision._tag === "ambiguous") {
+            accountState = addManagerAkahuTransactionSyncAccountWarning(
+              state.accountState,
+              pendingReplacementDecision.warning,
+            )
+            state = {
+              ...state,
+              accountState: incrementManagerAkahuTransactionSyncAccountCount(
+                accountState,
+                "warnings",
+              ),
+            }
+          }
+        }
+
         accountState = yield* createManagerAkahuTransaction({
           state: state.accountState,
           client,
@@ -493,6 +528,57 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     }
   },
 )
+
+const updateManagerAkahuSettledPendingReplacement = Effect.fn(
+  "updateManagerAkahuSettledPendingReplacement",
+)(function* (input: {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly client: ManagerAkahuTransactionSyncManagerClient
+  readonly fdxTransactionId: string
+  readonly classification: ManagerAkahuTransactionCreateClassification
+  readonly entry: ManagerBankOrCashAccountSyncRead["existingFdxTransactionIdEntries"][number]
+}) {
+  if (input.classification._tag !== input.entry._tag) {
+    let state = addManagerAkahuTransactionSyncAccountWarning(
+      input.state,
+      `Existing pending Manager entry ${input.entry.key} has a different transaction type than the settled Akahu transaction.`,
+    )
+    state = incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
+    return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+  }
+
+  const write =
+    input.classification._tag === "receipt"
+      ? input.client["PUT/api4/receipt"]({
+          key: input.entry.key,
+          value: input.classification.managerDecision.payload.value,
+        })
+      : input.client["PUT/api4/payment"]({
+          key: input.entry.key,
+          value: input.classification.managerDecision.payload.value,
+        })
+
+  const writeResult = yield* write.pipe(
+    Effect.as({ _tag: "updated" as const }),
+    Effect.catch((error) =>
+      Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+    ),
+  )
+
+  if (writeResult._tag === "error") {
+    return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
+  }
+
+  let state = addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId(
+    input.state,
+    input.entry.fdxTransactionId,
+  )
+  state = addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId(
+    state,
+    input.fdxTransactionId,
+  )
+  return incrementManagerAkahuTransactionSyncAccountCount(state, "pendingSettled")
+})
 
 const updateManagerAkahuPendingTransaction = Effect.fn("updateManagerAkahuPendingTransaction")(
   function* (input: {
