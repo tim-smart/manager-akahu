@@ -100,10 +100,13 @@ const buildManagerSuspenseLine = (
 const buildManagerClearanceFields = (clearance: ManagerImportClearance) =>
   clearance._tag === "pending" ? managerPendingClearanceFields : managerSettledClearanceFields
 
-interface ManagerSuspensePayloadInput extends Omit<
-  ManagerSuspenseImportDecisionInput,
-  "importabilityDecision" | "signedNormalizedAmount"
-> {
+interface ManagerSuspensePayloadInput {
+  readonly bankOrCashAccountKey: string
+  readonly date: string
+  readonly reference: string
+  readonly description: string
+  readonly fdxTransactionId: string
+  readonly clearance: ManagerImportClearance
   readonly amount: ManagerLineAmount
 }
 
@@ -166,7 +169,15 @@ export const buildManagerSuspenseImportDecision = (
   }
 
   const amount = getManagerLineAmountMagnitude(input.signedNormalizedAmount)
-  const payloadInput = { ...input, amount }
+  const payloadInput = {
+    bankOrCashAccountKey: input.bankOrCashAccountKey,
+    date: input.date,
+    reference: input.reference,
+    description: input.description,
+    fdxTransactionId: input.fdxTransactionId,
+    clearance: input.clearance,
+    amount,
+  } satisfies ManagerSuspensePayloadInput
 
   if (input.signedNormalizedAmount.startsWith("-")) {
     return { _tag: "payment", payload: buildManagerSuspensePaymentPayload(payloadInput) }

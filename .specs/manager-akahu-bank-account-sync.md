@@ -87,6 +87,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 1 follow-up tightened the suspense receipt/payment payload builders to return local payload types with required `value` objects, so downstream sync code can use `payload.value` without non-null assertions. Builder amount input is now a normalized decimal string boundary instead of `number | string`; future Akahu amount normalization must happen before calling these Manager payload builders.
 - Task 1 follow-up review replaced the public suspense receipt/payment builder pair with `buildManagerSuspenseImportDecision`. The helper now owns signed amount classification, payment absolute-amount conversion, zero-amount skipping, and importability skips before returning a receipt payload, payment payload, or explicit skip reason. Receipt/payment constructors remain private, and focused tests assert the local payloads remain assignable to the generated Manager POST endpoint wrappers.
 - Task 1 follow-up review follow-up simplified the focused compatibility contract tests so each receipt/payment scenario has one expected payload literal. Generated endpoint drift coverage now stays source-local through the `ManagerSuspenseReceiptPayload extends ManagerPostReceipt` and `ManagerSuspensePaymentPayload extends ManagerPostPayment` production payload contracts, with tests focused on behavior and omitted `paidBy`/`payee`/`bankClearDate` invariants.
+- Task 1 follow-up review follow-up audit narrowed the private suspense receipt/payment constructor input. After importability and zero-amount decisions, `buildManagerSuspenseImportDecision` now creates a local payload object containing only Manager write fields plus the normalized absolute amount, so decision-only fields no longer cross the private constructor boundary at runtime.
 
 ## Requirements
 
@@ -422,7 +423,7 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Avoid adding new wrapper helpers solely for tests. If assertion helpers are introduced, they should remove duplicated branch guards and payload literals rather than creating another abstraction layer around `buildManagerSuspenseImportDecision`.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
-### Task 1 follow-up review follow-up audit: Tighten private suspense payload construction boundary
+### Task 1 follow-up review follow-up audit: Tighten private suspense payload construction boundary (completed)
 
 - Simplify the private Manager suspense payload construction path in `packages/manager-api/src/ManagerCompatibility.ts`. `ManagerSuspensePayloadInput` currently appears to narrow the private receipt/payment constructor input, but `buildManagerSuspenseImportDecision` spreads the full decision input into `payloadInput`, so structural typing silently carries `signedNormalizedAmount` and `importabilityDecision` through a boundary that should not know about them.
 - Remove that fake private boundary or make it exact. After importability and zero-amount handling, destructure/build a local object containing only `bankOrCashAccountKey`, `date`, `reference`, `description`, `fdxTransactionId`, `clearance`, and the normalized absolute `amount`, then pass that exact shape into the private receipt/payment constructors.
