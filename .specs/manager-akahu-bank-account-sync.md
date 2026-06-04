@@ -40,20 +40,6 @@ The extension already discovers Akahu credentials from Manager Business Details 
 - Generated Manager client lazy-effect diagnostics and the server Node HTTP import are intentionally suppressed so baseline type/build validation is not blocked by non-feature diagnostics.
 - `pnpm ready` passes as of Task 0.
 
-### Task 0A validation-boundary findings
-
-- The website Vite config now reads local HTTPS certificates only when the dev server is started and only if both ignored certificate files exist. Production Vite config loading and bundle builds no longer require `apps/website/.cert/localhost-key.pem` or `apps/website/.cert/localhost.pem`.
-- The website build script now uses `tsc -b tsconfig.json` before `vp build`, so project references build `@app/domain` and `@app/manager-api` from source instead of depending on ignored/stale `dist` artifacts.
-- The root `ready` script now runs `vp run -r build`, which executes the real workspace build scripts, including the website production bundle, rather than only the root TypeScript project-reference build.
-- Validation was run after deleting ignored build outputs and TypeScript build-info files: `pnpm --filter website build` passes without local HTTPS certificates, and `pnpm ready` passes with website bundle output in the recursive build.
-
-### Task 0B validation/build ownership findings
-
-- Repository validation now has one owner for TypeScript emitted artifacts: the root `pnpm build` script runs the project-reference graph with `tsgo -b tsconfig.json` and owns package/server `dist` outputs plus per-project `tsconfig.tsbuildinfo` files during `pnpm ready`.
-- `pnpm ready` no longer invokes recursive workspace `build` scripts after the root project-reference build. It runs formatting, linting, recursive tests, the root project-reference build, and then only the missing website production bundle step.
-- The website exposes a separate `bundle` script for production bundling without re-running `tsc -b`. The website `build` script still runs `tsc -b tsconfig.json && vp build` so direct clean-checkout website builds continue to build referenced workspace packages from source before bundling.
-- The workspace package/app `build` scripts remain useful for direct package/app builds, but they are no longer an overlapping artifact owner in the repository-level `pnpm ready` validation path.
-
 ### Existing Akahu/domain/API pieces
 
 - packages/domain/src/Akahu.ts defines Akahu Account, Transaction, and PendingTransaction schemas.
@@ -386,36 +372,6 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Ensure Manager API client types for bank/cash accounts, receipts, and payments are available where sync code will use them.
 - If repository validation includes tests, ensure the current test setup passes before adding feature tests.
 - Validation: `pnpm ready` passes.
-
-### Task 0A: Code quality follow-up from baseline validation audit
-
-Validation-boundary slice completed:
-
-- HTTPS certificate loading is dev-server-only and optional; production/typecheck/build commands do not require ignored local certificate files.
-- `pnpm ready` runs real recursive workspace builds with `vp run -r build`, including the website production bundle.
-- `apps/website` uses `tsc -b tsconfig.json` before bundling so workspace dependencies are built from source in clean checkouts and website builds do not rely on stale package `dist` artifacts.
-- Validation: after deleting ignored build outputs and TypeScript build-info files, `pnpm --filter website build` passes without local HTTPS certificates, and `pnpm ready` passes with real website/package build coverage.
-
-Remaining Task 0A follow-up items:
-
-- Simplify Manager API type availability into an earned boundary: remove the public `managerApiPackageName` sentinel if it only exists to make a runtime test pass, and replace the placeholder test with a compile-time/type-level coverage check for the bank/cash account, receipt, payment, batch parameter, and clear-status aliases that future sync code will import.
-- Make module resolution canonical and easy to reason about. Choose either workspace package exports/project references or centralized TypeScript path mappings for `@app/*`; avoid relying on base `paths` that are accidentally shadowed by app-local `paths`. Verify the website can resolve `@app/manager-api` and `@app/manager-api/ManagerClient` from a clean checkout without depending on ignored `dist` artifacts left over from a prior build.
-- Revert or isolate incidental formatting churn in `.agents/skills` markdown, or adjust formatting configuration so code examples in repository guidance are not rewritten with awkward leading semicolons during unrelated baseline-validation work.
-
-### Task 0B: Code quality follow-up from Task 0A validation-boundary audit
-
-Task 0A restored real build coverage, but the audit found that the validation and module-resolution boundaries are still too ad hoc. Clean this up before starting Manager sync feature work.
-
-Validation/build ownership slice completed:
-
-- Root `build` is the repository validation owner for the TypeScript project-reference graph and emitted artifacts. `pnpm ready` runs `pnpm build` once, then runs the website-only `bundle` script for the production Vite bundle instead of recursively invoking every workspace `build` script.
-- Direct `pnpm --filter website build` remains a self-contained clean-checkout command by running `tsc -b tsconfig.json` before bundling; this direct app build is intentionally outside the `pnpm ready` artifact ownership path.
-- Validation: after deleting ignored build outputs and TypeScript build-info files, `pnpm --filter website build` passes without local HTTPS certificates, `pnpm ready` passes, the website bundle is produced, and package/server artifacts are produced by the root project-reference build in the repository validation path.
-
-Remaining Task 0B follow-up items:
-
-- Simplify website workspace-package resolution to one canonical mechanism. The current implementation combines package exports that point at `dist`, root/base TypeScript paths, website-local TypeScript paths, and Vite aliases that point directly at package `src` directories. Replace this with a single easy-to-reason-about boundary, preferably project references plus workspace package exports after referenced packages are built, or one shared source-alias mechanism consumed consistently by both TypeScript and Vite. Remove duplicated app-local `@app/*` mappings unless that duplication is deliberately chosen and documented as the canonical boundary.
-- Make dev HTTPS fallback explicit instead of silently magical. Production/typecheck/build config must never require ignored local certificates, but dev should clearly distinguish: complete cert pair enables HTTPS; partial cert pair fails with the exact missing path(s); no cert pair either logs/documents intentional HTTP fallback or requires an explicit opt-out. Avoid a silent downgrade that turns a local setup problem into later browser/runtime confusion.
 
 ### Task 1: Manager API compatibility spike
 
