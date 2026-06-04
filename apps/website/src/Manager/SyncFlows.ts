@@ -15,6 +15,7 @@ import {
   type ManagerAkahuSyncSummaryCounts,
 } from "@app/manager-api/ManagerAkahuTransactionSync"
 import {
+  buildManagerBankOrCashAccountSyncRead,
   fetchManagerBankOrCashAccountSyncRead,
   type ManagerBankOrCashAccountSyncRead,
   type ManagerBankOrCashAccountSyncReadClient,
@@ -345,7 +346,10 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
       case "payment":
         {
           const pendingReplacementDecision = decidePendingToSettledMatch({
-            syncRead,
+            syncRead: getManagerAkahuPendingToSettledCandidateSyncRead(
+              syncRead,
+              state.accountState.processedFdxTransactionIds,
+            ),
             settledDate: transaction.date,
             settledSignedAmount: transaction.amount,
             settledDescription: getAkahuTransactionDescription(transaction),
@@ -675,6 +679,28 @@ const addManagerAkahuSettledPhaseExistingOverlap = (
   ...state,
   existingSettledOverlapIds: new Set(state.existingSettledOverlapIds).add(fdxTransactionId),
 })
+
+const getManagerAkahuPendingToSettledCandidateSyncRead = (
+  syncRead: ManagerBankOrCashAccountSyncRead,
+  processedFdxTransactionIds: ReadonlySet<string>,
+): ManagerBankOrCashAccountSyncRead =>
+  buildManagerBankOrCashAccountSyncRead({
+    bankOrCashAccountKey: syncRead.bankOrCashAccountKey,
+    receipts: syncRead.receipts.filter((receipt) =>
+      shouldKeepManagerAkahuSyncReadItem(receipt.item.fdxTransactionId, processedFdxTransactionIds),
+    ),
+    payments: syncRead.payments.filter((payment) =>
+      shouldKeepManagerAkahuSyncReadItem(payment.item.fdxTransactionId, processedFdxTransactionIds),
+    ),
+  })
+
+const shouldKeepManagerAkahuSyncReadItem = (
+  fdxTransactionId: string | null | undefined,
+  processedFdxTransactionIds: ReadonlySet<string>,
+): boolean =>
+  fdxTransactionId === undefined ||
+  fdxTransactionId === null ||
+  !processedFdxTransactionIds.has(fdxTransactionId)
 
 const buildManagerAkahuSettledPhaseResult = (
   state: ManagerAkahuSettledPhaseState,

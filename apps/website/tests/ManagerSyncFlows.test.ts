@@ -810,6 +810,58 @@ it.effect(
     }),
 )
 
+it.effect("does not reuse a pending-to-settled replacement candidate in the same account run", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount()
+    const { client, receiptPayloads, receiptPutPayloads } = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [
+          pendingReceiptItem("receipt-existing-pending", {
+            date: "2026-06-05",
+            amount: "12.34",
+            description: "Coffee Shop",
+          }),
+        ],
+      },
+    })
+
+    const summary = yield* runTransactionSync({
+      accounts: [managerAccount],
+      client,
+      transactionsByAccount: {
+        [accountId]: [
+          settledTransaction({
+            id: "tx-settled-first",
+            amount: "12.34",
+            merchantName: "Coffee Shop",
+          }),
+          settledTransaction({
+            id: "tx-settled-second",
+            amount: "12.34",
+            merchantName: "Coffee Shop",
+          }),
+        ],
+      },
+    })
+
+    expect(receiptPutPayloads.map((payload) => payload.key)).toEqual(["receipt-existing-pending"])
+    expect(receiptPutPayloads.map((payload) => payload.value?.fdxTransactionId)).toEqual([
+      "tx-settled-first",
+    ])
+    expect(receiptPayloads.map((payload) => payload.value.fdxTransactionId)).toEqual([
+      "tx-settled-second",
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 2,
+      receiptsCreated: 1,
+      pendingSettled: 1,
+      duplicatesSkipped: 0,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
 it.effect("creates settled entries when pending candidates are ambiguous or non-matching", () =>
   Effect.gen(function* () {
     const ambiguousAccount = linkedAccount()
