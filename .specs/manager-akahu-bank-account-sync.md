@@ -75,6 +75,16 @@ The generated Manager API client includes endpoints and fields needed for this f
   - POST/api4/payment, PUT/api4/payment, POST/api4/payment-batch, PUT/api4/payment-batch
   - Fields include date, reference, paidFrom, cleared, bankClearDate, description, lines, fdxTransactionId, and custom fields.
 
+### Task 1 Manager API compatibility findings
+
+- `packages/manager-api/src/ManagerCompatibility.ts` now records the first-pass Manager receipt/payment write decisions behind named constants and payload builders.
+- The generated Manager API client exposes `paidBy` on receipt creates and `payee` on payment creates as optional fields. The first-pass suspense import payload builders intentionally omit them.
+- The generated Manager API client exposes receipt/payment amounts on lines, not on the top-level receipt/payment object. First-pass suspense imports use exactly one line containing `amount` and `lineDescription`, with no `account`, so Manager can leave the uncategorized amount in suspense.
+- Manager's published guide for cleared/pending bank transactions verifies the field combinations: new bank receipts/payments default to cleared on the transaction date, `Cleared` = `On a later date` plus a date represents a later cleared date, and `Cleared` = `On a later date` without `bankClearDate` represents pending.
+- The Manager clear-status numeric values are codified as `ManagerBankAccountClearStatusValue.onSameDate = 0` and `ManagerBankAccountClearStatusValue.onLaterDate = 1`, with settled builders using `onSameDate` and pending builders using `onLaterDate` without `bankClearDate`.
+- Live `POST /api4/receipt` and `POST /api4/payment` validation was not possible in this workspace because no Manager business/API host was available. Current validation is generated-client shape plus Manager guide behaviour, covered by focused tests.
+- Foreign-currency Manager bank/cash account write behaviour was not verified. `getManagerBankAccountCurrencyImportDecision` treats blank/null account currency as importable and returns a skip-with-warning decision for any non-empty currency value.
+
 ## Requirements
 
 ### Setup-state UI
@@ -206,13 +216,13 @@ For each selected linked account:
 5. Zero amount is skipped and counted as zeroAmountSkipped unless a later compatibility check proves Manager accepts and needs zero-value entries.
 6. Common field mapping:
    - date = Akahu transaction calendar date formatted for Manager, expected as YYYY-MM-DD.
-   - bankClearDate = same date for settled transactions.
+   - settled transactions use the verified same-date clear status; do not set `bankClearDate` for same-date clearance.
    - description = Akahu merchant name when present, otherwise Akahu description.
    - reference = Akahu settled transaction ID or generated pending fingerprint.
    - fdxTransactionId = Akahu settled transaction ID for settled transactions; generated pending fingerprint for pending transactions.
    - lines = the minimal verified Manager-compatible uncategorized/suspense representation.
 7. Settled transactions are marked cleared on the transaction date using verified Manager fields/status values.
-8. Pending transactions are marked pending using verified Manager fields/status values. Based on Manager behaviour, this is expected to be "on a later date" with no bankClearDate, but implementation must verify.
+8. Pending transactions are marked pending using the verified "on a later date" clear status with no `bankClearDate`.
 
 ### Decimal and date handling
 
@@ -373,7 +383,7 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - If repository validation includes tests, ensure the current test setup passes before adding feature tests.
 - Validation: `pnpm ready` passes.
 
-### Task 1: Manager API compatibility spike
+### Task 1: Manager API compatibility spike (completed)
 
 - Verify minimal valid Manager receipt and payment payloads for uncategorized/suspense imports.
 - Verify BankAccountClearStatus numeric values and field combinations for settled and pending entries.
@@ -381,7 +391,7 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Verify foreign-currency account behaviour. If not verified, codify first-pass skip-with-warning behaviour.
 - Record verified constants behind named functions/constants in code so feature code does not use unexplained numeric values.
 - Add small tests for constants/payload builders where practical.
-- Validation: build/typecheck and any added tests pass.
+- Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, `pnpm build`, and `pnpm ready` pass.
 
 ### Task 2: Pagination foundations
 

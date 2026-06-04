@@ -1,4 +1,5 @@
 export * from "./ManagerClient.ts"
+export * from "./ManagerCompatibility.ts"
 
 export const managerApiPackageName = "manager-api" as const
 
