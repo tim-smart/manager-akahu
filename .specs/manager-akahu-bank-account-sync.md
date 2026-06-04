@@ -90,6 +90,13 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 1 follow-up review follow-up audit narrowed the private suspense receipt/payment constructor input. After importability and zero-amount decisions, `buildManagerSuspenseImportDecision` now creates a local payload object containing only Manager write fields plus the normalized absolute amount, so decision-only fields no longer cross the private constructor boundary at runtime.
 - Task 1 follow-up review follow-up audit follow-up collapsed the remaining private suspense payload construction layer. `buildManagerSuspenseImportDecision` now builds one shared local base value and suspense line after importability, zero-amount handling, and absolute-amount normalization, then branches only for the Manager account field (`receivedIn` for receipts, `paidFrom` for payments).
 
+### Task 2 Akahu pagination findings
+
+- `apps/server/src/Akahu.ts` now uses one shared cursor-pagination helper for Akahu account, settled transaction, and pending transaction reads. `ListAccounts` collects all account pages before returning, while transaction RPCs continue to stream items across every page.
+- The transaction request shape was intentionally kept unchanged apart from forwarding `cursor`, preserving the existing 30-day Akahu transaction fetch behaviour/window rather than introducing a new date range parameter.
+- Focused server tests cover multi-page mocked Akahu account, settled transaction, and pending transaction responses, including the cursor order requested from each mock page.
+- Manager batch pagination helpers were not added in this Akahu-only server/RPC change and remain pending for the later Manager sync implementation tasks that read receipts/payments.
+
 ## Requirements
 
 ### Setup-state UI
@@ -407,12 +414,12 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Move the compatibility tests out of `packages/manager-api/tests/index.test.ts` into a focused `ManagerCompatibility.test.ts`, leaving `index.test.ts` as a barrel/package-name smoke test. The current test file is already becoming a grab bag and will grow harder to scan as more compatibility cases are added.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
-### Task 2: Pagination foundations
+### Task 2: Pagination foundations (Akahu server/RPC completed, Manager pagination pending)
 
-- Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present.
+- Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present. (completed)
 - Add Manager batch pagination helpers for receipts/payments filtered by bank/cash account and for any other batch reads needed by setup/sync.
-- Add tests or mocked coverage for multi-page Akahu and Manager responses.
-- Validation: server/domain/website build and pagination tests pass.
+- Add tests or mocked coverage for multi-page Akahu and Manager responses. (Akahu coverage completed; Manager coverage pending with Manager pagination helpers.)
+- Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass for the Akahu pagination portion.
 
 ### Task 3: Setup-state flow, atom, and minimal setup UI
 

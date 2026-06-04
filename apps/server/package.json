@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch --experimental-strip-types src/main.ts",
     "build": "tsc -b tsconfig.json",
+    "test": "pnpm --workspace-root exec vp test apps/server/tests",
     "start": "node dist/main.js"
   },
   "dependencies": {

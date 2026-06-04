@@ -1,8 +1,27 @@
 import { Context, Effect, Layer, Option, Redacted, Stream } from "effect"
-import { Account, AccountId, AkahuApi, PendingTransaction, Transaction } from "@app/domain/Akahu"
+import {
+  Account,
+  AccountId,
+  AkahuApi,
+  type PaginatedResponse,
+  PendingTransaction,
+  Transaction,
+} from "@app/domain/Akahu"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
 import { NodeHttpClient } from "@effect/platform-node"
+
+export const paginatedAkahuItems = <A, E, R>(
+  fetchPage: (cursor: string | undefined) => Effect.Effect<PaginatedResponse<A>, E, R>,
+): Stream.Stream<A, E, R> =>
+  Stream.paginate(undefined as string | undefined, (cursor) =>
+    fetchPage(cursor).pipe(
+      Effect.map(
+        (response) =>
+          [response.items, Option.fromUndefinedOr(response.cursor?.next ?? undefined)] as const,
+      ),
+    ),
+  )
 
 export class AkahuCredentials extends Context.Service<
   AkahuCredentials,
@@ -48,41 +67,24 @@ export class Akahu extends Context.Service<
       })
 
       return Akahu.of({
-        accounts: akahu.accounts
-          .list({
-            query: {},
-          })
-          .pipe(
-            Effect.map((r) => r.items),
-            Effect.orDie,
-          ),
+        accounts: paginatedAkahuItems((cursor) =>
+          akahu.accounts.list({
+            query: { cursor },
+          }),
+        ).pipe(Stream.runCollect, Effect.orDie),
         transactions: ({ accountId }) =>
-          Stream.paginate(undefined as string | undefined, (cursor) =>
-            akahu.transactions
-              .list({
-                params: { accountId },
-                query: { cursor },
-              })
-              .pipe(
-                Effect.map((response) => [
-                  response.items,
-                  Option.fromUndefinedOr(response.cursor?.next ?? undefined),
-                ]),
-              ),
+          paginatedAkahuItems((cursor) =>
+            akahu.transactions.list({
+              params: { accountId },
+              query: { cursor },
+            }),
           ).pipe(Stream.orDie),
         pendingTransactions: ({ accountId }) =>
-          Stream.paginate(undefined as string | undefined, (cursor) =>
-            akahu.transactions
-              .pending({
-                params: { accountId },
-                query: { amount_as_number: "true", cursor },
-              })
-              .pipe(
-                Effect.map((response) => [
-                  response.items,
-                  Option.fromUndefinedOr(response.cursor?.next ?? undefined),
-                ]),
-              ),
+          paginatedAkahuItems((cursor) =>
+            akahu.transactions.pending({
+              params: { accountId },
+              query: { amount_as_number: "true", cursor },
+            }),
           ).pipe(Stream.orDie),
       })
     }),
