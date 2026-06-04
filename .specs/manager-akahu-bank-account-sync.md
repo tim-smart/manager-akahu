@@ -697,6 +697,14 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add mocked tests for settled receipt/payment payloads, duplicate skipping, zero skipping, and summary counts. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` passes; `pnpm --filter website build` passes.
 
+### Task 5 follow-up review: Stream settled overlap boundary and clean sync orchestration
+
+- Rework `apps/website/src/Manager/SyncFlows.ts` so settled transactions are processed incrementally instead of collecting the whole stream with `Stream.runCollect` before processing. The current structure cannot enforce the required five-overlap settled-history stop: after the fifth duplicate, older non-overlapping transactions are still imported. Prefer a single account-level settled stream processor with an accumulator for counts, warnings, errors, created fdx IDs, and overlap count, and terminate before importing transactions older than the fifth overlap.
+- Add focused mocked tests for the settled-history boundary: five existing duplicates followed by an older new transaction must not POST the older transaction, while fewer than five duplicates followed by an older new transaction must still import it. Keep existing duplicate, zero, unsupported, and summary-count coverage.
+- Lift foreign-currency importability to an account-level policy before the per-transaction receipt/payment/zero branch. The current service fetches the complete Manager sync read and then emits the same unsupported-account warning once per transaction. Prefer one warning per unsupported account and a direct count strategy, such as counting fetched settled transactions as `unsupportedSkipped` without building duplicate lookup state for an account that cannot import.
+- Extract the Akahu credential field-name/value/decode boundary shared by `apps/website/src/Manager/Flows.ts` and `apps/website/src/Manager/SyncFlows.ts`. Keep setup-only custom-field creation in setup flows, but avoid duplicating hardcoded credential field names, trimming rules, and `AkahuTokens` decoding in the sync service.
+- Validation: run `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, any affected setup-flow tests, and `pnpm --filter website build`.
+
 ### Task 6: Pending-transaction sync service extension with mocked tests
 
 - Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true.
