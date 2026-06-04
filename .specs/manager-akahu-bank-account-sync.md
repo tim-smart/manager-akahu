@@ -609,6 +609,14 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Remove the duplicate fdx index construction from `packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts`. The test-local `managerSyncRead` helper recreates the canonical `existingFdxTransactionIdEntries` / index builder that the production sync helper just deleted, so the tests can pass against hand-built shapes that production never returns. Build focused sync-helper fixtures through `fetchManagerBankOrCashAccountSyncRead` with an in-memory receipt/payment batch client, or extract a canonical production builder from `ManagerBatchPagination.ts` and reuse it in both production and tests. (completed with `buildManagerBankOrCashAccountSyncRead`)
 - Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerBatchPagination.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build` pass.
 
+### Task 4 follow-up review follow-up audit: Make Akahu transaction date boundary explicit
+
+- Replace the plain `Schema.String` settled/pending transaction `date` fields in `packages/domain/src/Akahu.ts` with a domain-owned Akahu transaction date schema/type that still preserves the raw Akahu string but validates the sync invariant at the RPC decode boundary, at minimum a leading `yyyy-mm-dd` calendar date and preferably valid calendar components. The current model lets any arbitrary string cross RPC and pushes failures into `ManagerAkahuTransactionSync.ts` as thrown downstream defects.
+- Make `ManagerAkahuTransactionSync.ts` consume that canonical date boundary, or a domain-owned derived Manager calendar date, instead of the local structural `ManagerAkahuTransactionDateBoundary` identity wrapper. Avoid replacing tagged test-only strings with an equally loose `{ date: string }` shape that any unrelated object can satisfy.
+- Split Akahu raw-date conversion from Manager receipt/payment entry date handling in pending-to-settled matching. Existing Manager entries should be parsed or validated as Manager `yyyy-mm-dd` dates, not passed through an Akahu transaction-date helper just because both currently expose a `date` string.
+- Add focused tests that malformed Akahu transaction dates fail at the domain/RPC/server decode boundary, while offset/near-midnight Akahu strings such as `2026-06-05T00:30:00.000+13:00` remain preserved and still produce the leading Manager calendar date used by sync.
+- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build` pass.
+
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
 - Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
