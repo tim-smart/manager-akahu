@@ -2,5 +2,5 @@
 set -euo pipefail
 
 direnv allow
-corepack installj
+corepack install
 pnpm install
