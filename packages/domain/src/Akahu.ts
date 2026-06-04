@@ -27,7 +27,7 @@ export class Transaction extends Schema.Class<Transaction>("akahu/Transaction")(
   _account: AccountId,
   _user: UserId,
   _connection: ConnectionId,
-  date: Schema.DateTimeUtcFromString,
+  date: Schema.String,
   description: Schema.String,
   amount: BigDecimalFromNumber,
   merchant: Schema.optional(Merchant),
@@ -44,7 +44,7 @@ export class PendingTransaction extends Schema.Class<PendingTransaction>(
   _user: UserId,
   _account: AccountId,
   _connection: ConnectionId,
-  date: Schema.DateTimeUtcFromString,
+  date: Schema.String,
   description: Schema.String,
   amount: BigDecimalFromNumber,
 }) {}

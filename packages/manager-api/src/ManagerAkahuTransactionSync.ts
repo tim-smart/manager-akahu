@@ -35,9 +35,9 @@ export type ManagerAkahuSyncSummaryCounts = Record<ManagerAkahuSyncSummaryCountK
 
 export type ManagerAkahuDecimalInput = string | BigDecimal.BigDecimal
 
-export type ManagerAkahuDateInput =
-  | { readonly _tag: "managerDate"; readonly date: string }
-  | { readonly _tag: "rawAkahuDate"; readonly date: string }
+export interface ManagerAkahuTransactionDateBoundary {
+  readonly date: string
+}
 
 export type ManagerAkahuTransactionKind = "receipt" | "payment"
 
@@ -63,7 +63,7 @@ export type ManagerAkahuSuspenseImportClassification =
 
 export interface ManagerAkahuSuspenseImportClassificationInput {
   readonly bankOrCashAccountKey: string
-  readonly date: ManagerAkahuDateInput
+  readonly date: ManagerAkahuTransactionDateBoundary
   readonly signedAmount: ManagerAkahuDecimalInput
   readonly reference: string
   readonly description: string
@@ -84,7 +84,7 @@ export type ManagerAkahuPendingFingerprintDecision =
 
 export interface ManagerAkahuPendingFingerprintInput {
   readonly akahuAccountId: string
-  readonly date: ManagerAkahuDateInput
+  readonly date: ManagerAkahuTransactionDateBoundary
   readonly amount: ManagerAkahuDecimalInput
   readonly description: string
 }
@@ -112,9 +112,8 @@ export type ManagerAkahuPendingExactFingerprintDecision =
     }
 
 export interface ManagerAkahuPendingToSettledMatchInput {
-  readonly bankOrCashAccountKey: string
   readonly syncRead: ManagerBankOrCashAccountSyncRead
-  readonly settledDate: ManagerAkahuDateInput
+  readonly settledDate: ManagerAkahuTransactionDateBoundary
   readonly settledSignedAmount: ManagerAkahuDecimalInput
   readonly settledDescription: string
   readonly dateWindowDays?: number | undefined
@@ -166,24 +165,15 @@ export const addManagerAkahuSyncSummaryCounts = (
   return next
 }
 
-const managerDatePattern = /^\d{4}-\d{2}-\d{2}$/
-
-export const formatManagerAkahuDate = (input: ManagerAkahuDateInput): string => {
+export const formatManagerAkahuDate = (input: ManagerAkahuTransactionDateBoundary): string => {
   const date = input.date.trim()
-  if (input._tag === "managerDate") {
-    if (!managerDatePattern.test(date)) {
-      throw new Error(`Manager date must be yyyy-mm-dd: ${input.date}`)
-    }
-    return date
-  }
-
   const match = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/.exec(date)
   const calendarDate = match?.[1]
   if (calendarDate !== undefined) {
     return calendarDate
   }
 
-  throw new Error(`Raw Akahu date must start with yyyy-mm-dd: ${input.date}`)
+  throw new Error(`Akahu transaction date must start with yyyy-mm-dd: ${input.date}`)
 }
 
 const toBigDecimal = (
@@ -383,7 +373,7 @@ export const decidePendingToSettledMatch = (
     if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
       continue
     }
-    if (getEntryBankOrCashAccountKey(entry) !== input.bankOrCashAccountKey) {
+    if (getEntryBankOrCashAccountKey(entry) !== input.syncRead.bankOrCashAccountKey) {
       continue
     }
     if (getEntryKind(entry) !== settledKind) {
@@ -410,10 +400,8 @@ export const decidePendingToSettledMatch = (
     const entryDate = getEntryItem(entry).date
     if (
       entryDate === undefined ||
-      Math.abs(
-        calendarDayNumber(formatManagerAkahuDate({ _tag: "managerDate", date: entryDate })) -
-          settledDay,
-      ) > dateWindowDays
+      Math.abs(calendarDayNumber(formatManagerAkahuDate({ date: entryDate })) - settledDay) >
+        dateWindowDays
     ) {
       continue
     }

@@ -239,6 +239,7 @@ it.effect(
       })
 
       const syncRead = yield* fetchManagerBankOrCashAccountSyncRead(client, publicSyncReadInput)
+      expect(syncRead.bankOrCashAccountKey).toBe(bankOrCashAccountKey)
       expect(syncRead.receipts).toHaveLength(totalItems(fullPageSize, 2))
       expect(syncRead.payments).toHaveLength(totalItems(fullPageSize, 2))
       expectKeyAtPageOffset(syncRead.receipts, "receipt", 0)

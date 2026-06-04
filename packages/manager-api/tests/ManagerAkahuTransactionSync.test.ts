@@ -1,14 +1,10 @@
 import { BigDecimal } from "effect"
 import { expect, test } from "@effect/vitest"
-import type {
-  ManagerBankOrCashAccountSyncRead,
-  ManagerExistingFdxTransactionIdEntry,
-  ManagerPaymentItem,
-  ManagerReceiptItem,
-} from "../src/index.ts"
+import type { ManagerPaymentItem, ManagerReceiptItem } from "../src/index.ts"
 import {
   addManagerAkahuSyncSummaryCounts,
   buildAkahuPendingTransactionFingerprint,
+  buildManagerBankOrCashAccountSyncRead,
   classifyManagerAkahuSuspenseImport,
   decidePendingExactFingerprint,
   decidePendingToSettledMatch,
@@ -21,6 +17,8 @@ import {
   normalizeAkahuTransactionDescription,
   normalizeManagerAkahuAmount,
 } from "../src/index.ts"
+
+const bankOrCashAccountKey = "bank-1"
 
 const receiptItem = (key: string, item: ManagerReceiptItem["item"]): ManagerReceiptItem => ({
   key,
@@ -36,67 +34,15 @@ const paymentItem = (key: string, item: ManagerPaymentItem["item"]): ManagerPaym
   _actions: null,
 })
 
-const appendExistingFdxTransactionIdEntry = (
-  index: Map<string, Array<ManagerExistingFdxTransactionIdEntry>>,
-  entry: ManagerExistingFdxTransactionIdEntry,
-) => {
-  const entries = index.get(entry.fdxTransactionId)
-  if (entries === undefined) {
-    index.set(entry.fdxTransactionId, [entry])
-    return
-  }
-
-  entries.push(entry)
-}
-
 const managerSyncRead = (input: {
   readonly receipts?: ReadonlyArray<ManagerReceiptItem>
   readonly payments?: ReadonlyArray<ManagerPaymentItem>
-}): ManagerBankOrCashAccountSyncRead => {
-  const receipts = input.receipts ?? []
-  const payments = input.payments ?? []
-  const entries: Array<ManagerExistingFdxTransactionIdEntry> = []
-  const index = new Map<string, Array<ManagerExistingFdxTransactionIdEntry>>()
-
-  for (const receipt of receipts) {
-    const fdxTransactionId = receipt.item.fdxTransactionId
-    if (fdxTransactionId == null || fdxTransactionId === "") {
-      continue
-    }
-
-    const entry: ManagerExistingFdxTransactionIdEntry = {
-      _tag: "receipt",
-      fdxTransactionId,
-      key: receipt.key,
-      receipt,
-    }
-    entries.push(entry)
-    appendExistingFdxTransactionIdEntry(index, entry)
-  }
-
-  for (const payment of payments) {
-    const fdxTransactionId = payment.item.fdxTransactionId
-    if (fdxTransactionId == null || fdxTransactionId === "") {
-      continue
-    }
-
-    const entry: ManagerExistingFdxTransactionIdEntry = {
-      _tag: "payment",
-      fdxTransactionId,
-      key: payment.key,
-      payment,
-    }
-    entries.push(entry)
-    appendExistingFdxTransactionIdEntry(index, entry)
-  }
-
-  return {
-    receipts,
-    payments,
-    existingFdxTransactionIdEntries: entries,
-    existingFdxTransactionIdIndex: new Map(index),
-  }
-}
+}) =>
+  buildManagerBankOrCashAccountSyncRead({
+    bankOrCashAccountKey,
+    receipts: input.receipts ?? [],
+    payments: input.payments ?? [],
+  })
 
 const pendingReceipt = (
   key: string,
@@ -113,7 +59,7 @@ const pendingReceipt = (
       options.fdxTransactionId ??
       `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:12.34:coffee shop`,
     date: options.date ?? "2026-06-04",
-    receivedIn: options.bankOrCashAccountKey ?? "bank-1",
+    receivedIn: options.bankOrCashAccountKey ?? bankOrCashAccountKey,
     description: options.description ?? "Coffee Shop",
     lines: [
       { amount: options.amount ?? "12.34", lineDescription: options.description ?? "Coffee Shop" },
@@ -135,19 +81,15 @@ const pendingPayment = (
       options.fdxTransactionId ??
       `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:-9.99:shop`,
     date: options.date ?? "2026-06-04",
-    paidFrom: options.bankOrCashAccountKey ?? "bank-1",
+    paidFrom: options.bankOrCashAccountKey ?? bankOrCashAccountKey,
     description: options.description ?? "Shop",
     lines: [{ amount: options.amount ?? "9.99", lineDescription: options.description ?? "Shop" }],
   })
 
 test("formats Manager dates by preserving Akahu string calendar dates", () => {
-  expect(
-    formatManagerAkahuDate({ _tag: "rawAkahuDate", date: "2026-06-05T00:30:00.000+13:00" }),
-  ).toBe("2026-06-05")
-  expect(
-    formatManagerAkahuDate({ _tag: "rawAkahuDate", date: "2026-06-04T23:30:00.000-10:00" }),
-  ).toBe("2026-06-04")
-  expect(formatManagerAkahuDate({ _tag: "managerDate", date: "2026-06-05" })).toBe("2026-06-05")
+  expect(formatManagerAkahuDate({ date: "2026-06-05T00:30:00.000+13:00" })).toBe("2026-06-05")
+  expect(formatManagerAkahuDate({ date: "2026-06-04T23:30:00.000-10:00" })).toBe("2026-06-04")
+  expect(formatManagerAkahuDate({ date: "2026-06-05" })).toBe("2026-06-05")
 })
 
 test("normalizes decimal amounts to stable two-decimal strings without number inputs", () => {
@@ -169,7 +111,7 @@ test("normalizes decimal amounts to stable two-decimal strings without number in
 test("classifies signed amounts through the Manager suspense import boundary", () => {
   const receipt = classifyManagerAkahuSuspenseImport({
     bankOrCashAccountKey: "bank-1",
-    date: { _tag: "managerDate", date: "2026-06-04" },
+    date: { date: "2026-06-04" },
     signedAmount: "12.345",
     reference: "tx-1",
     description: "Coffee",
@@ -186,7 +128,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
 
   const payment = classifyManagerAkahuSuspenseImport({
     bankOrCashAccountKey: "bank-1",
-    date: { _tag: "managerDate", date: "2026-06-04" },
+    date: { date: "2026-06-04" },
     signedAmount: "-9.994",
     reference: "tx-2",
     description: "Shop",
@@ -204,7 +146,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
   expect(
     classifyManagerAkahuSuspenseImport({
       bankOrCashAccountKey: "bank-1",
-      date: { _tag: "managerDate", date: "2026-06-04" },
+      date: { date: "2026-06-04" },
       signedAmount: "0.00",
       reference: "tx-zero",
       description: "Zero",
@@ -217,7 +159,7 @@ test("classifies signed amounts through the Manager suspense import boundary", (
   expect(
     classifyManagerAkahuSuspenseImport({
       bankOrCashAccountKey: "bank-1",
-      date: { _tag: "managerDate", date: "2026-06-04" },
+      date: { date: "2026-06-04" },
       signedAmount: "12.34",
       reference: "tx-unsupported",
       description: "Unsupported",
@@ -234,7 +176,7 @@ test("normalizes descriptions and generates versioned pending fingerprints", () 
   expect(
     buildAkahuPendingTransactionFingerprint({
       akahuAccountId: "akahu-account-1",
-      date: { _tag: "rawAkahuDate", date: "2026-06-05T00:30:00.000+13:00" },
+      date: { date: "2026-06-05T00:30:00.000+13:00" },
       amount: "12.340",
       description: "  Coffee\nSHOP  ",
     }),
@@ -256,6 +198,7 @@ test("uses the canonical Manager sync-read fdxTransactionId entries and index", 
     payments: [paymentItem("payment-1", { fdxTransactionId: "settled-2" })],
   })
 
+  expect(syncRead.bankOrCashAccountKey).toBe(bankOrCashAccountKey)
   expect(syncRead.existingFdxTransactionIdEntries.map((entry) => entry.fdxTransactionId)).toEqual([
     "settled-1",
     "settled-2",
@@ -311,9 +254,8 @@ test("safely matches exactly one pending candidate to a settled transaction", ()
   })
 
   const decision = decidePendingToSettledMatch({
-    bankOrCashAccountKey: "bank-1",
     syncRead,
-    settledDate: { _tag: "managerDate", date: "2026-06-04" },
+    settledDate: { date: "2026-06-04" },
     settledSignedAmount: "12.34",
     settledDescription: "coffee shop",
   })
@@ -333,9 +275,8 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
 
   expect(
     decidePendingToSettledMatch({
-      bankOrCashAccountKey: "bank-1",
       syncRead,
-      settledDate: { _tag: "managerDate", date: "2026-06-10" },
+      settledDate: { date: "2026-06-10" },
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
     }),
@@ -343,9 +284,8 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
 
   expect(
     decidePendingToSettledMatch({
-      bankOrCashAccountKey: "bank-1",
       syncRead,
-      settledDate: { _tag: "managerDate", date: "2026-06-04" },
+      settledDate: { date: "2026-06-04" },
       settledSignedAmount: "-12.34",
       settledDescription: "coffee shop",
     }),
@@ -353,11 +293,10 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
 
   expect(
     decidePendingToSettledMatch({
-      bankOrCashAccountKey: "bank-1",
       syncRead: managerSyncRead({
         receipts: [pendingReceipt("receipt-other", { bankOrCashAccountKey: "bank-2" })],
       }),
-      settledDate: { _tag: "managerDate", date: "2026-06-04" },
+      settledDate: { date: "2026-06-04" },
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
     }),
@@ -369,9 +308,8 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
   })
   expect(
     decidePendingToSettledMatch({
-      bankOrCashAccountKey: "bank-1",
       syncRead: ambiguous,
-      settledDate: { _tag: "managerDate", date: "2026-06-04" },
+      settledDate: { date: "2026-06-04" },
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
     })._tag,

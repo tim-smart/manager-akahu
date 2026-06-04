@@ -47,21 +47,29 @@ const account = (id: string, name: string) => ({
   refreshed,
 })
 
-const settledTransaction = (id: string, accountId = "acc_1") => ({
+const settledTransaction = (
+  id: string,
+  accountId = "acc_1",
+  date = "2026-01-02T00:00:00.000Z",
+) => ({
   _id: id,
   _account: accountId,
   _user: "user_1",
   _connection: "conn_1",
-  date: "2026-01-02T00:00:00.000Z",
+  date,
   description: id,
   amount: 12.34,
 })
 
-const pendingTransaction = (description: string, accountId = "acc_1") => ({
+const pendingTransaction = (
+  description: string,
+  accountId = "acc_1",
+  date = "2026-01-02T00:00:00.000Z",
+) => ({
   _account: accountId,
   _user: "user_1",
   _connection: "conn_1",
-  date: "2026-01-02T00:00:00.000Z",
+  date,
   description,
   amount: -5.67,
 })
@@ -174,7 +182,10 @@ it.effect("AccountTransactions streams all settled transactions across cursor pa
       [
         {
           request: expectedAkahuRequest({ pathname: "/v1/accounts/acc_1/transactions" }),
-          response: page([settledTransaction("txn_1")], "settled-page-2"),
+          response: page(
+            [settledTransaction("txn_1", "acc_1", "2026-06-05T00:30:00.000+13:00")],
+            "settled-page-2",
+          ),
         },
         {
           request: expectedAkahuRequest({
@@ -198,6 +209,7 @@ it.effect("AccountTransactions streams all settled transactions across cursor pa
         ),
     )
     expect(result.map((item) => item._id)).toEqual(["txn_1", "txn_2", "txn_3"])
+    expect(result[0]?.date).toBe("2026-06-05T00:30:00.000+13:00")
   }),
 )
 
@@ -236,7 +248,10 @@ it.effect(
               pathname: "/v1/accounts/acc_1/transactions/pending",
               query: { amount_as_number: "true" },
             }),
-            response: page([pendingTransaction("pending-1")], "pending-page-2"),
+            response: page(
+              [pendingTransaction("pending-1", "acc_1", "2026-06-04T23:30:00.000-10:00")],
+              "pending-page-2",
+            ),
           },
           {
             request: expectedAkahuRequest({
@@ -253,5 +268,6 @@ it.effect(
           ),
       )
       expect(result.map((item) => item.description)).toEqual(["pending-1", "pending-2"])
+      expect(result[0]?.date).toBe("2026-06-04T23:30:00.000-10:00")
     }),
 )

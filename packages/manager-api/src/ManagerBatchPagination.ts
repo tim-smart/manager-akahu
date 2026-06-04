@@ -36,6 +36,7 @@ export type ManagerExistingFdxTransactionIdEntry =
     }
 
 export interface ManagerBankOrCashAccountSyncRead {
+  readonly bankOrCashAccountKey: string
   readonly receipts: ReadonlyArray<ItemOfReceipt>
   readonly payments: ReadonlyArray<ItemOfPayment>
   readonly existingFdxTransactionIdEntries: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
@@ -105,17 +106,15 @@ const appendExistingFdxTransactionIdEntry = (
   entries.push(entry)
 }
 
-const buildManagerExistingFdxTransactionIdRead = (
-  receipts: ReadonlyArray<ItemOfReceipt>,
-  payments: ReadonlyArray<ItemOfPayment>,
-): Pick<
-  ManagerBankOrCashAccountSyncRead,
-  "existingFdxTransactionIdEntries" | "existingFdxTransactionIdIndex"
-> => {
+export const buildManagerBankOrCashAccountSyncRead = (input: {
+  readonly bankOrCashAccountKey: string
+  readonly receipts: ReadonlyArray<ItemOfReceipt>
+  readonly payments: ReadonlyArray<ItemOfPayment>
+}): ManagerBankOrCashAccountSyncRead => {
   const entries: Array<ManagerExistingFdxTransactionIdEntry> = []
   const mutableIndex = new Map<string, Array<ManagerExistingFdxTransactionIdEntry>>()
 
-  for (const receipt of receipts) {
+  for (const receipt of input.receipts) {
     const fdxTransactionId = receipt.item.fdxTransactionId
     if (fdxTransactionId === undefined || fdxTransactionId === null || fdxTransactionId === "") {
       continue
@@ -131,7 +130,7 @@ const buildManagerExistingFdxTransactionIdRead = (
     appendExistingFdxTransactionIdEntry(mutableIndex, entry)
   }
 
-  for (const payment of payments) {
+  for (const payment of input.payments) {
     const fdxTransactionId = payment.item.fdxTransactionId
     if (fdxTransactionId === undefined || fdxTransactionId === null || fdxTransactionId === "") {
       continue
@@ -148,6 +147,9 @@ const buildManagerExistingFdxTransactionIdRead = (
   }
 
   return {
+    bankOrCashAccountKey: input.bankOrCashAccountKey,
+    receipts: input.receipts,
+    payments: input.payments,
     existingFdxTransactionIdEntries: entries,
     existingFdxTransactionIdIndex: new Map(mutableIndex),
   }
@@ -188,11 +190,9 @@ export const fetchManagerBankOrCashAccountSyncRead = Effect.fn(
     },
     { concurrency: "unbounded" },
   )
-  const existingFdxTransactionIdRead = buildManagerExistingFdxTransactionIdRead(receipts, payments)
-
-  return {
+  return buildManagerBankOrCashAccountSyncRead({
+    bankOrCashAccountKey: input.bankOrCashAccountKey,
     receipts,
     payments,
-    ...existingFdxTransactionIdRead,
-  }
+  })
 })
