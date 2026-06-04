@@ -446,7 +446,8 @@ export const securityDecode = <Security extends HttpApiSecurity.HttpApiSecurity>
     case "Http": {
       return Effect.map(
         HttpServerRequest,
-        (request) => Redacted.make((request.headers.authorization ?? "").slice(self.schemeLength)) as any
+        // schemeLength + space
+        (request) => Redacted.make((request.headers.authorization ?? "").slice(self.schemeLength + 1)) as any
       )
     }
     case "ApiKey": {
