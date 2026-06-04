@@ -88,6 +88,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 1 follow-up review replaced the public suspense receipt/payment builder pair with `buildManagerSuspenseImportDecision`. The helper now owns signed amount classification, payment absolute-amount conversion, zero-amount skipping, and importability skips before returning a receipt payload, payment payload, or explicit skip reason. Receipt/payment constructors remain private, and focused tests assert the local payloads remain assignable to the generated Manager POST endpoint wrappers.
 - Task 1 follow-up review follow-up simplified the focused compatibility contract tests so each receipt/payment scenario has one expected payload literal. Generated endpoint drift coverage now stays source-local through the `ManagerSuspenseReceiptPayload extends ManagerPostReceipt` and `ManagerSuspensePaymentPayload extends ManagerPostPayment` production payload contracts, with tests focused on behavior and omitted `paidBy`/`payee`/`bankClearDate` invariants.
 - Task 1 follow-up review follow-up audit narrowed the private suspense receipt/payment constructor input. After importability and zero-amount decisions, `buildManagerSuspenseImportDecision` now creates a local payload object containing only Manager write fields plus the normalized absolute amount, so decision-only fields no longer cross the private constructor boundary at runtime.
+- Task 1 follow-up review follow-up audit follow-up collapsed the remaining private suspense payload construction layer. `buildManagerSuspenseImportDecision` now builds one shared local base value and suspense line after importability, zero-amount handling, and absolute-amount normalization, then branches only for the Manager account field (`receivedIn` for receipts, `paidFrom` for payments).
 
 ## Requirements
 
@@ -430,7 +431,7 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Prefer inlining or deleting `ManagerSuspensePayloadInput` if that makes the flow more direct. Do not add new public API or test-only wrappers; keep public behavior and the focused compatibility tests unchanged.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
-### Task 1 follow-up review follow-up audit follow-up: Collapse the private suspense payload construction layer
+### Task 1 follow-up review follow-up audit follow-up: Collapse the private suspense payload construction layer (completed)
 
 - The completed boundary-tightening change fixed the spread leak and is behaviorally acceptable, but it left a private `ManagerSuspensePayloadInput` plus nearly identical private receipt/payment constructors in `packages/manager-api/src/ManagerCompatibility.ts`. Before later sync code depends on this shape, do one more code-judo pass to see whether that private layer can disappear entirely.
 - Prefer building one shared local base value/line after importability, zero-amount handling, and absolute-amount normalization, then branch only for the Manager-specific account field (`receivedIn` for receipts versus `paidFrom` for payments). If this makes the module more direct, delete `ManagerSuspensePayloadInput` and any private helper that is only passing fields through.

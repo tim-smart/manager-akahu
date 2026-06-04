@@ -89,26 +89,8 @@ export const managerSettledClearanceFields = {
   cleared: ManagerBankAccountClearStatusValue.onSameDate,
 } as const satisfies Pick<ManagerReceiptCreate, "cleared">
 
-const buildManagerSuspenseLine = (
-  input: Pick<ManagerSuspensePayloadInput, "amount" | "description">,
-) =>
-  ({
-    amount: input.amount,
-    lineDescription: input.description,
-  }) satisfies ManagerSuspenseLine
-
 const buildManagerClearanceFields = (clearance: ManagerImportClearance) =>
   clearance._tag === "pending" ? managerPendingClearanceFields : managerSettledClearanceFields
-
-interface ManagerSuspensePayloadInput {
-  readonly bankOrCashAccountKey: string
-  readonly date: string
-  readonly reference: string
-  readonly description: string
-  readonly fdxTransactionId: string
-  readonly clearance: ManagerImportClearance
-  readonly amount: ManagerLineAmount
-}
 
 const getManagerLineAmountMagnitude = (
   signedNormalizedAmount: ManagerLineAmount,
@@ -122,34 +104,6 @@ const getManagerLineAmountMagnitude = (
 
 const isZeroManagerLineAmount = (signedNormalizedAmount: ManagerLineAmount): boolean =>
   /^0+(?:\.0+)?$/.test(getManagerLineAmountMagnitude(signedNormalizedAmount))
-
-const buildManagerSuspenseReceiptPayload = (
-  input: ManagerSuspensePayloadInput,
-): ManagerSuspenseReceiptPayload => ({
-  value: {
-    date: input.date,
-    reference: input.reference,
-    receivedIn: input.bankOrCashAccountKey,
-    ...buildManagerClearanceFields(input.clearance),
-    description: input.description,
-    lines: [buildManagerSuspenseLine(input)],
-    fdxTransactionId: input.fdxTransactionId,
-  },
-})
-
-const buildManagerSuspensePaymentPayload = (
-  input: ManagerSuspensePayloadInput,
-): ManagerSuspensePaymentPayload => ({
-  value: {
-    date: input.date,
-    reference: input.reference,
-    paidFrom: input.bankOrCashAccountKey,
-    ...buildManagerClearanceFields(input.clearance),
-    description: input.description,
-    lines: [buildManagerSuspenseLine(input)],
-    fdxTransactionId: input.fdxTransactionId,
-  },
-})
 
 export const buildManagerSuspenseImportDecision = (
   input: ManagerSuspenseImportDecisionInput,
@@ -169,21 +123,40 @@ export const buildManagerSuspenseImportDecision = (
   }
 
   const amount = getManagerLineAmountMagnitude(input.signedNormalizedAmount)
-  const payloadInput = {
-    bankOrCashAccountKey: input.bankOrCashAccountKey,
+  const line = {
+    amount,
+    lineDescription: input.description,
+  } satisfies ManagerSuspenseLine
+  const baseValue = {
     date: input.date,
     reference: input.reference,
+    ...buildManagerClearanceFields(input.clearance),
     description: input.description,
     fdxTransactionId: input.fdxTransactionId,
-    clearance: input.clearance,
-    amount,
-  } satisfies ManagerSuspensePayloadInput
-
-  if (input.signedNormalizedAmount.startsWith("-")) {
-    return { _tag: "payment", payload: buildManagerSuspensePaymentPayload(payloadInput) }
+    lines: [line] as const,
   }
 
-  return { _tag: "receipt", payload: buildManagerSuspenseReceiptPayload(payloadInput) }
+  if (input.signedNormalizedAmount.startsWith("-")) {
+    return {
+      _tag: "payment",
+      payload: {
+        value: {
+          ...baseValue,
+          paidFrom: input.bankOrCashAccountKey,
+        },
+      } satisfies ManagerSuspensePaymentPayload,
+    }
+  }
+
+  return {
+    _tag: "receipt",
+    payload: {
+      value: {
+        ...baseValue,
+        receivedIn: input.bankOrCashAccountKey,
+      },
+    } satisfies ManagerSuspenseReceiptPayload,
+  }
 }
 
 export const getManagerBankAccountCurrencyImportDecision = (
