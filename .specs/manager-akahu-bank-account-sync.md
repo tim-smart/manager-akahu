@@ -545,6 +545,16 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Render loading, all setup messages, ready linked-account list without sync controls, stale warnings, and retryable errors. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm --filter @app/domain build`, `pnpm --filter website build`, and `pnpm ready` pass.
 
+### Task 3 follow-up review: Tighten setup-state boundaries and UI decomposition
+
+- Replace invalid-credential detection based on `Cause.pretty` and regex matching in `apps/website/src/Manager/Flows.ts` with a typed Akahu/RPC error boundary. Preserve Akahu HTTP/read failures in the server error channel instead of erasing them with `Effect.orDie`, expose structured auth/read failures through `packages/domain/src/rpc.ts`, and have `ManagerFlows` map those typed failures to `invalidCredentials` or retryable setup errors with normal Effect error handling.
+- Stop round-tripping expected setup failures through defects. `ManagerFlows` should convert known Manager/Akahu setup failures into explicit setup states at the setup boundary, while true defects remain defects for the atom/runtime error path. Avoid a broad `catchCause` that collapses Manager failures, Akahu failures, and defects into the same generic setup state.
+- Collapse the overlapping loading/error protocols between `ManagerAkahuSetupState` and `AsyncResult` in `apps/website/src/main.tsx`. Prefer one UI-facing setup-state model by converting `AsyncResult` waiting/error/defect states into the setup-state union before rendering, or remove unreachable loading/error cases from the domain service contract if the atom remains the canonical async boundary.
+- Tighten the Manager bank/cash account selection boundary in `collectManagerAkahuAccountSelections`. Type the input against the canonical generated `ManagerBankOrCashAccountItem` alias from `@app/manager-api`, keep only custom-field string narrowing local, and update tests so fixtures `satisfy` the real Manager API item shape instead of a loose local `ManagerAkahuAccountRecord` with ad-hoc optional fields.
+- Rework `makeManagerAkahuSetupState` so impossible combinations are unrepresentable. The helper currently accepts `akahuAccountCount` separately from `linkedAccounts`, so callers can pass contradictory state. Prefer passing the actual Akahu account array plus the selection result, or keep classification local to the setup discovery flow where Akahu accounts, linked accounts, and stale selections are derived together.
+- Move the setup UI out of `apps/website/src/main.tsx` before Task 7 adds sync controls and modal state. Create focused Manager setup components such as `Manager/SetupStateView.tsx`, `SetupMessage`, `StaleSelections`, and `LinkedAccountsList`, and render stale-selection warnings through one shared path for every setup state that carries them.
+- Validation: run focused website tests for setup-state classification, `pnpm --filter website build`, and any affected `@app/domain`/server build or RPC tests after changing typed Akahu errors.
+
 ### Task 4: Pure transaction sync helpers with tests
 
 - Add a pure helper module independent of React, Atom, Manager client, and ApiClient.
