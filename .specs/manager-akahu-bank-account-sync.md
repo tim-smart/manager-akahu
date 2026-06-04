@@ -665,6 +665,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Keep the existing single fallible raw-string transform, the shared `CalendarDate` field schema, and the Manager-side date separation unchanged. (completed)
 - Validation: `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, and `pnpm --filter @app/manager-api build` pass.
 
+### Task 4 follow-up review follow-up audit follow-up review follow-up review follow-up review: Enforce Akahu date nominality proof outside production code
+
+- Move the Akahu transaction date structural-rejection proof out of the runtime-only Vitest path and into an enforced no-emit typecheck boundary, such as a focused domain typetest file or a test tsconfig/script that is included in validation. The current `@ts-expect-error` in `packages/domain/tests/Akahu.test.ts` documents the intended nominal contract, but `packages/domain/tsconfig.json` only includes `src`, `@app/domain` build only typechecks production sources, and the listed `pnpm test "packages/domain/tests/Akahu.test.ts"` command does not reliably fail on a stale or unused `@ts-expect-error`.
+- Keep production `packages/domain/src/Akahu.ts` free of nominal guard scaffolding. The fix should not reintroduce `AssertTrue`, private phantom fields, static assertion members, wrapper types, or other production-only self-tests just to regain type proof coverage.
+- Prefer a direct, source-local type assertion that fails if structural `{ raw, calendarDate }` values become assignable to `AkahuTransactionDate`, and keep the runtime Akahu date tests focused on decode/encode behavior and malformed calendar rejection.
+- Update validation for this boundary to name the enforced typecheck command in addition to the existing domain/runtime test and downstream build checks.
+
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
 - Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
