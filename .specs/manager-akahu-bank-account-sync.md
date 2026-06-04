@@ -373,6 +373,15 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - If repository validation includes tests, ensure the current test setup passes before adding feature tests.
 - Validation: `pnpm ready` passes.
 
+### Task 0A: Code quality follow-up from baseline validation audit
+
+- Restore the validation boundary so `pnpm ready` proves the same package builds developers rely on, not only the root TypeScript project-reference build. In particular, fix the website Vite config so production builds do not eagerly read missing local HTTPS certificates; keep certificate loading dev-only/optional or document the exact external prerequisite while still running the equivalent local typecheck/build/test commands.
+- After the Vite config is fixed, make `ready` run the real workspace build scripts with the correct recursive invocation, or explicitly compose root typecheck plus per-package app/package builds so website bundling remains covered without duplicate/no-op complexity.
+- Simplify Manager API type availability into an earned boundary: remove the public `managerApiPackageName` sentinel if it only exists to make a runtime test pass, and replace the placeholder test with a compile-time/type-level coverage check for the bank/cash account, receipt, payment, batch parameter, and clear-status aliases that future sync code will import.
+- Make module resolution canonical and easy to reason about. Choose either workspace package exports/project references or centralized TypeScript path mappings for `@app/*`; avoid relying on base `paths` that are accidentally shadowed by app-local `paths`. Verify the website can resolve `@app/manager-api` and `@app/manager-api/ManagerClient` from a clean checkout without depending on ignored `dist` artifacts left over from a prior build.
+- Revert or isolate incidental formatting churn in `.agents/skills` markdown, or adjust formatting configuration so code examples in repository guidance are not rewritten with awkward leading semicolons during unrelated baseline-validation work.
+- Validation: `pnpm ready` passes and includes the real website/package build coverage; `pnpm --filter website build` either passes or has its unavailable local-certificate prerequisite documented with equivalent local typecheck and bundle-safe validation.
+
 ### Task 1: Manager API compatibility spike
 
 - Verify minimal valid Manager receipt and payment payloads for uncategorized/suspense imports.
