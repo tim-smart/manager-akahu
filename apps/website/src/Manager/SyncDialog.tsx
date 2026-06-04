@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 import { Dialog } from "radix-ui"
 import type { LinkedAccount } from "@app/domain/Manager/AkahuCustomFields"
 import { Button } from "@/components/ui/button"
@@ -11,12 +11,12 @@ import {
 } from "./SyncUi"
 
 export function SyncDialog(props: {
+  readonly children: ReactNode
   readonly state: ManagerAkahuSyncDialogState
-  readonly restoreFocusElement: HTMLButtonElement | null
   readonly onCancel: () => void
   readonly onStart: () => void
 }) {
-  const { onCancel, onStart, restoreFocusElement, state } = props
+  const { children, onCancel, onStart, state } = props
   const contentRef = useRef<HTMLDivElement>(null)
   const initialFocusRef = useRef<HTMLButtonElement>(null)
   const canClose = canCloseManagerAkahuSyncDialog(state)
@@ -37,6 +37,7 @@ export function SyncDialog(props: {
         }
       }}
     >
+      {children}
       {state._tag === "closed" ? null : (
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 bg-background/80 backdrop-blur-sm" />
@@ -59,8 +60,9 @@ export function SyncDialog(props: {
               focusSyncDialogStateTarget(state, initialFocusRef.current, contentRef.current)
             }}
             onCloseAutoFocus={(event) => {
-              event.preventDefault()
-              restoreFocusElement?.focus()
+              if (!canClose) {
+                event.preventDefault()
+              }
             }}
           >
             <div className="flex flex-col gap-6">
@@ -110,6 +112,29 @@ export function SyncDialog(props: {
         </Dialog.Portal>
       )}
     </Dialog.Root>
+  )
+}
+
+export function SyncDialogTriggerButton(props: {
+  readonly accounts: ReadonlyArray<LinkedAccount>
+  readonly children: ReactNode
+  readonly disabled: boolean
+  readonly onSync: (accounts: ReadonlyArray<LinkedAccount>) => void
+  readonly className?: string
+  readonly variant?: "default" | "outline"
+}) {
+  return (
+    <Dialog.Trigger asChild>
+      <Button
+        type="button"
+        variant={props.variant}
+        className={props.className}
+        disabled={props.disabled}
+        onClick={() => props.onSync(props.accounts)}
+      >
+        {props.children}
+      </Button>
+    </Dialog.Trigger>
   )
 }
 
