@@ -51,14 +51,6 @@ const unsupportedForeignCurrencyLinkedAccount = new LinkedAccount({
   akahuAccount,
 })
 
-const importableEmptyLinkedAccount = new LinkedAccount({
-  key: "manager-empty-checking",
-  name: "Manager Empty Checking",
-  currency: null,
-  canHavePendingTransactions: true,
-  akahuAccount,
-})
-
 const zeroPendingFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:0.00:zero coffee"
 const akahuTransactionDate = DateTime.makeUnsafe("2026-06-05T00:00:00.000Z").pipe(
   DateTime.setZoneNamedUnsafe("Pacific/Auckland"),
@@ -108,16 +100,6 @@ const makePendingTransaction = (description: string, amount: string) =>
     description,
     amount: BigDecimal.fromStringUnsafe(amount),
   })
-
-const makeUnsupportedAmountPendingTransaction = (description: string, amount: string) =>
-  ({
-    _account: accountId,
-    _user: userId,
-    _connection: connectionId,
-    date: akahuTransactionDate,
-    description,
-    amount,
-  }) as unknown as PendingTransaction
 
 const makeMockClient = () => {
   const receiptBatchRequests: Array<unknown> = []
@@ -244,36 +226,6 @@ it.effect("skips unsupported foreign-currency accounts with one account warning"
       settledFetched: 2,
       pendingFetched: 1,
       unsupportedSkipped: 3,
-      warnings: 1,
-      errors: 0,
-    })
-  }),
-)
-
-it.effect("preserves per-transaction unsupported pending fingerprint warnings", () =>
-  Effect.gen(function* () {
-    const { client, paymentPayloads, paymentPutPayloads, receiptPayloads, receiptPutPayloads } =
-      makeMockClient()
-
-    const summary = yield* syncManagerAkahuTransactions({
-      accounts: [importableEmptyLinkedAccount],
-      client,
-      tokens,
-      fetchSettledTransactions: () => Stream.empty,
-      fetchPendingTransactions: () =>
-        Stream.fromIterable([
-          makeUnsupportedAmountPendingTransaction("Unsupported pending", "not-a-decimal"),
-        ]),
-    })
-
-    expect(receiptPayloads).toEqual([])
-    expect(paymentPayloads).toEqual([])
-    expect(receiptPutPayloads).toEqual([])
-    expect(paymentPutPayloads).toEqual([])
-    expect(summary.accounts[0]?.warnings).toEqual(["Unsupported pending amount: not-a-decimal"])
-    expect(summary.overall).toMatchObject({
-      pendingFetched: 1,
-      unsupportedSkipped: 1,
       warnings: 1,
       errors: 0,
     })

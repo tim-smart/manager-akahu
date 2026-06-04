@@ -22,7 +22,6 @@ import {
 } from "@app/manager-api/ManagerBatchPagination"
 import {
   getManagerBankAccountCurrencyImportDecision,
-  type ManagerBankAccountCurrencyImportDecision,
   type ManagerSuspensePaymentValue,
   type ManagerSuspenseReceiptValue,
 } from "@app/manager-api/ManagerCompatibility"
@@ -80,6 +79,7 @@ export class ManagerAkahuTransactionSyncConfigurationError extends Schema.Tagged
 ) {}
 
 const managerAkahuSettledExistingOverlapLimit = 5
+const managerAkahuImportCurrencyDecision = { _tag: "import" } as const
 
 interface ManagerAkahuTransactionSyncAccountState {
   readonly counts: ManagerAkahuSyncSummaryCounts
@@ -103,11 +103,6 @@ type ManagerAkahuTransactionCreateClassification = Extract<
   { readonly _tag: "receipt" | "payment" }
 >
 
-type ManagerAkahuImportableCurrencyDecision = Extract<
-  ManagerBankAccountCurrencyImportDecision,
-  { readonly _tag: "import" }
->
-
 interface ManagerAkahuReceiptUpdatePayload {
   readonly key: string
   readonly value: ManagerSuspenseReceiptValue
@@ -122,7 +117,6 @@ interface ManagerAkahuTransactionSyncAccountContext {
   readonly account: LinkedAccount
   readonly client: ManagerAkahuTransactionSyncManagerClient
   readonly syncRead: ManagerBankOrCashAccountSyncRead
-  readonly importabilityDecision: ManagerAkahuImportableCurrencyDecision
 }
 
 export class ManagerSyncFlows extends Context.Service<
@@ -199,8 +193,6 @@ const syncManagerAkahuTransactionsForAccount = Effect.fn("syncManagerAkahuTransa
       )
     }
 
-    const importableDecision: ManagerAkahuImportableCurrencyDecision = importabilityDecision
-
     const syncReadResult = yield* fetchManagerBankOrCashAccountSyncRead(input.client, {
       bankOrCashAccountKey: account.key,
     }).pipe(
@@ -218,7 +210,6 @@ const syncManagerAkahuTransactionsForAccount = Effect.fn("syncManagerAkahuTransa
       account,
       client: input.client,
       syncRead: syncReadResult.syncRead,
-      importabilityDecision: importableDecision,
     }
     let accountState = initialManagerAkahuTransactionSyncAccountState()
 
@@ -410,7 +401,7 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
     readonly state: ManagerAkahuSettledPhaseState
     readonly transaction: Transaction
   }) {
-    const { account, client, importabilityDecision, syncRead } = input.context
+    const { account, client, syncRead } = input.context
     const transaction = input.transaction
     let accountState = incrementManagerAkahuTransactionSyncAccountCount(
       input.state.accountState,
@@ -449,7 +440,7 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
       description: getAkahuTransactionDescription(transaction),
       fdxTransactionId: transaction._id,
       clearance: { _tag: "settled" },
-      importabilityDecision,
+      importabilityDecision: managerAkahuImportCurrencyDecision,
     })
 
     switch (classification._tag) {
@@ -576,7 +567,7 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     readonly transaction: PendingTransaction
     readonly fingerprintDecision: ReturnType<typeof buildAkahuPendingTransactionFingerprint>
   }): Effect.fn.Return<ManagerAkahuTransactionSyncAccountState> {
-    const { account, client, importabilityDecision, syncRead } = input.context
+    const { account, client, syncRead } = input.context
     const transaction = input.transaction
     const description = transaction.description
     let state = incrementManagerAkahuTransactionSyncAccountCount(input.state, "pendingFetched")
@@ -610,7 +601,7 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
       description,
       fdxTransactionId: fingerprintDecision.fingerprint,
       clearance: { _tag: "pending" },
-      importabilityDecision,
+      importabilityDecision: managerAkahuImportCurrencyDecision,
     })
 
     switch (classification._tag) {

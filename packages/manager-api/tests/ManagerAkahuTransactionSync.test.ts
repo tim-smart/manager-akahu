@@ -109,7 +109,6 @@ test("classifies signed amounts through the Manager suspense import boundary", (
     bankOrCashAccountKey: "bank-1",
     date: DateTime.makeUnsafe("2026-06-04"),
     signedAmount: "12.345",
-    reference: "tx-1",
     description: "Coffee",
     fdxTransactionId: "tx-1",
     clearance: { _tag: "settled" },
@@ -126,7 +125,6 @@ test("classifies signed amounts through the Manager suspense import boundary", (
     bankOrCashAccountKey: "bank-1",
     date: DateTime.makeUnsafe("2026-06-04"),
     signedAmount: "-9.994",
-    reference: "tx-2",
     description: "Shop",
     fdxTransactionId: "tx-2",
     clearance: { _tag: "pending" },
@@ -144,7 +142,6 @@ test("classifies signed amounts through the Manager suspense import boundary", (
       bankOrCashAccountKey: "bank-1",
       date: DateTime.makeUnsafe("2026-06-04"),
       signedAmount: "0.00",
-      reference: "tx-zero",
       description: "Zero",
       fdxTransactionId: "tx-zero",
       clearance: { _tag: "settled" },
@@ -157,7 +154,6 @@ test("classifies signed amounts through the Manager suspense import boundary", (
       bankOrCashAccountKey: "bank-1",
       date: DateTime.makeUnsafe("2026-06-04"),
       signedAmount: "12.34",
-      reference: "tx-unsupported",
       description: "Unsupported",
       fdxTransactionId: "tx-unsupported",
       clearance: { _tag: "settled" },
@@ -183,6 +179,15 @@ test("normalizes descriptions and generates versioned pending fingerprints", () 
     normalizedAmount: "12.34",
     normalizedDescription: "coffee shop",
   })
+
+  expect(
+    buildAkahuPendingTransactionFingerprint({
+      akahuAccountId: "akahu-account-1",
+      date: DateTime.makeZonedUnsafe("2026-06-05T00:30:00.000+13:00"),
+      amount: "not-a-decimal",
+      description: "Unsupported pending",
+    }),
+  ).toEqual({ _tag: "unsupported", warning: "Unsupported pending amount: not-a-decimal" })
 })
 
 test("uses the canonical Manager sync-read fdxTransactionId entries and index", () => {
