@@ -24,6 +24,7 @@ import {
 const bankOrCashAccountKey = "bank-1"
 
 const akahuDate = (date: string) => Schema.decodeSync(AkahuTransactionDate)(date)
+const noExcludedFdxTransactionIds = (): ReadonlySet<string> => new Set()
 
 const unsafeAkahuDateForTest = (date: {
   readonly raw: string
@@ -297,6 +298,7 @@ test("safely matches exactly one pending candidate to a settled transaction", ()
     settledDate: akahuDate("2026-06-04"),
     settledSignedAmount: "12.34",
     settledDescription: "coffee shop",
+    excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
   })
   expect(decision._tag).toBe("match")
   if (decision._tag !== "match") {
@@ -352,6 +354,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       settledDate: akahuDate("2026-06-10"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
+      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
     }),
   ).toEqual({ _tag: "none" })
 
@@ -361,6 +364,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "-12.34",
       settledDescription: "coffee shop",
+      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
     }),
   ).toEqual({ _tag: "none" })
 
@@ -372,6 +376,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
+      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
     }),
   ).toEqual({ _tag: "none" })
 
@@ -383,6 +388,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       settledDate: akahuDate("2026-03-01"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
+      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
     }),
   ).toEqual({ _tag: "none" })
 
@@ -394,6 +400,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
+      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
     }),
   ).toEqual({ _tag: "none" })
 
@@ -405,6 +412,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
+      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
     }),
   ).toEqual({ _tag: "none" })
 
@@ -418,6 +426,7 @@ test("does not match pending-to-settled candidates outside safe checks", () => {
       settledDate: akahuDate("2026-06-04"),
       settledSignedAmount: "12.34",
       settledDescription: "coffee shop",
+      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
     })._tag,
   ).toBe("ambiguous")
 })

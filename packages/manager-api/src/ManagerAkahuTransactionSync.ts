@@ -114,7 +114,7 @@ export interface ManagerAkahuPendingToSettledMatchInput {
   readonly settledDate: AkahuTransactionDate
   readonly settledSignedAmount: ManagerAkahuDecimalInput
   readonly settledDescription: string
-  readonly excludedFdxTransactionIds?: ReadonlySet<string> | undefined
+  readonly excludedFdxTransactionIds: ReadonlySet<string>
   readonly dateWindowDays?: number | undefined
 }
 
@@ -365,7 +365,7 @@ export const decidePendingToSettledMatch = (
   const candidates: Array<ManagerExistingFdxTransactionIdEntry> = []
 
   for (const entry of input.syncRead.existingFdxTransactionIdEntries) {
-    if (input.excludedFdxTransactionIds?.has(entry.fdxTransactionId) === true) {
+    if (input.excludedFdxTransactionIds.has(entry.fdxTransactionId)) {
       continue
     }
     if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
