@@ -76,6 +76,7 @@ const linkedAccount = (
 const settledTransaction = (options: {
   readonly id: string
   readonly amount: string
+  readonly date?: string | undefined
   readonly description?: string | undefined
   readonly merchantName?: string | undefined
   readonly account?: Account | undefined
@@ -85,7 +86,7 @@ const settledTransaction = (options: {
     _account: options.account?._id ?? accountId,
     _user: userId,
     _connection: connectionId,
-    date: akahuDate("2026-06-05T00:30:00.000+13:00"),
+    date: akahuDate(options.date ?? "2026-06-05T00:30:00.000+13:00"),
     description: options.description ?? "Akahu description",
     amount: BigDecimal.fromStringUnsafe(options.amount),
     merchant:
@@ -502,7 +503,7 @@ it.effect(
     }),
 )
 
-it.effect("continues settled sync past fewer than five overlaps", () =>
+it.effect("continues settled sync to older history past fewer than five overlaps", () =>
   Effect.gen(function* () {
     const managerAccount = linkedAccount()
     const existingOverlapIds = ["tx-overlap-1", "tx-overlap-2", "tx-overlap-3", "tx-overlap-4"]
@@ -518,13 +519,17 @@ it.effect("continues settled sync past fewer than five overlaps", () =>
       transactionsByAccount: {
         [accountId]: [
           ...existingOverlapIds.map((id) => settledTransaction({ id, amount: "12.34" })),
-          settledTransaction({ id: "tx-older-new", amount: "4.56" }),
+          settledTransaction({
+            id: "tx-older-new",
+            amount: "4.56",
+            date: "2026-04-01T00:00:00.000Z",
+          }),
         ],
       },
     })
 
-    expect(receiptPayloads.map((payload) => payload.value.fdxTransactionId)).toEqual([
-      "tx-older-new",
+    expect(receiptPayloads).toMatchObject([
+      { value: { date: "2026-04-01", fdxTransactionId: "tx-older-new" } },
     ])
     expect(paymentPayloads).toEqual([])
     expect(summary.overall).toMatchObject({

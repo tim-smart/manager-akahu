@@ -24,6 +24,12 @@ const paginatedAkahuItems = <A, E, R>(
     ),
   )
 
+const settledTransactionHistoryQuery = (cursor: string | undefined) => ({
+  // Akahu's account transaction endpoint defaults to the full app-accessible
+  // settled history when start/end are omitted; keep sync history cursor-only.
+  cursor,
+})
+
 export class AkahuCredentials extends Context.Service<
   AkahuCredentials,
   {
@@ -81,7 +87,7 @@ export class Akahu extends Context.Service<
           paginatedAkahuItems((cursor) =>
             akahu.transactions.list({
               params: { accountId },
-              query: { cursor },
+              query: settledTransactionHistoryQuery(cursor),
             }),
           ).pipe(Stream.mapError(mapAkahuRpcError)),
         pendingTransactions: ({ accountId }) =>

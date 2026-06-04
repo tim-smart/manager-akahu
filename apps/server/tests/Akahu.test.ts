@@ -176,7 +176,7 @@ it.effect("ListAccounts preserves Akahu authentication failures as typed RPC err
   }),
 )
 
-it.effect("AccountTransactions streams all settled transactions across cursor pages", () =>
+it.effect("AccountTransactions streams full settled history across cursor pages", () =>
   Effect.gen(function* () {
     const result = yield* runWithMockAkahu(
       [
@@ -192,14 +192,17 @@ it.effect("AccountTransactions streams all settled transactions across cursor pa
             pathname: "/v1/accounts/acc_1/transactions",
             query: { cursor: "settled-page-2" },
           }),
-          response: page([settledTransaction("txn_2")], "settled-page-3"),
+          response: page(
+            [settledTransaction("txn_2", "acc_1", "2026-04-01T00:00:00.000Z")],
+            "settled-page-3",
+          ),
         },
         {
           request: expectedAkahuRequest({
             pathname: "/v1/accounts/acc_1/transactions",
             query: { cursor: "settled-page-3" },
           }),
-          response: page([settledTransaction("txn_3")]),
+          response: page([settledTransaction("txn_3", "acc_1", "2025-12-31T00:00:00.000Z")]),
         },
       ],
       (client) =>
@@ -212,6 +215,10 @@ it.effect("AccountTransactions streams all settled transactions across cursor pa
     expect(result[0]?.date).toMatchObject({
       raw: "2026-06-05T00:30:00.000+13:00",
       calendarDate: "2026-06-05",
+    })
+    expect(result[1]?.date).toMatchObject({
+      raw: "2026-04-01T00:00:00.000Z",
+      calendarDate: "2026-04-01",
     })
   }),
 )
