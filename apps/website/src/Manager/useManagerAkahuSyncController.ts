@@ -40,30 +40,40 @@ export const closeManagerAkahuSyncController = (setState: SetManagerAkahuSyncDia
 }
 
 export const startManagerAkahuSyncController = (input: {
-  readonly state: ManagerAkahuSyncDialogState
   readonly inFlightRef: ManagerAkahuSyncInFlightRef
   readonly setState: SetManagerAkahuSyncDialogState
   readonly runTransactionSync: RunManagerAkahuTransactionSync
 }): void => {
-  if (!canStartManagerAkahuSyncDialog(input.state) || input.inFlightRef.current) {
+  let accounts: ReadonlyArray<LinkedAccount> | undefined
+  input.setState((current) => {
+    if (!canStartManagerAkahuSyncDialog(current) || input.inFlightRef.current) {
+      return current
+    }
+
+    accounts = current.accounts
+    return startManagerAkahuSyncDialog(current)
+  })
+
+  if (accounts === undefined) {
     return
   }
-
-  const accounts = input.state.accounts
+  const selectedAccounts = accounts
   input.inFlightRef.current = true
-  input.setState(startManagerAkahuSyncDialog(input.state))
-  void input.runTransactionSync({ accounts }).then(
-    (summary) => {
-      input.inFlightRef.current = false
-      input.setState((current) => completeManagerAkahuSyncDialog(current, summary))
-    },
-    () => {
-      input.inFlightRef.current = false
-      input.setState((current) =>
-        failManagerAkahuSyncDialog(current, managerAkahuSyncFailureMessage),
-      )
-    },
-  )
+
+  void Promise.resolve()
+    .then(() => input.runTransactionSync({ accounts: selectedAccounts }))
+    .then(
+      (summary) => {
+        input.inFlightRef.current = false
+        input.setState((current) => completeManagerAkahuSyncDialog(current, summary))
+      },
+      () => {
+        input.inFlightRef.current = false
+        input.setState((current) =>
+          failManagerAkahuSyncDialog(current, managerAkahuSyncFailureMessage),
+        )
+      },
+    )
 }
 
 export const useManagerAkahuSyncController = (
@@ -83,7 +93,7 @@ export const useManagerAkahuSyncController = (
   }
 
   const start = () => {
-    startManagerAkahuSyncController({ state, inFlightRef, setState, runTransactionSync })
+    startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
   }
 
   return {

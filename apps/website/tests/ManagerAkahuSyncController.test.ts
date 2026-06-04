@@ -6,6 +6,7 @@ import { expect, it } from "@effect/vitest"
 import type { ManagerAkahuTransactionSyncSummary } from "../src/Manager/SyncFlows.ts"
 import {
   closeManagerAkahuSyncController,
+  managerAkahuSyncFailureMessage,
   startManagerAkahuSyncController,
   type RunManagerAkahuTransactionSync,
   type SetManagerAkahuSyncDialogState,
@@ -49,6 +50,12 @@ const summaryFor = (account: LinkedAccount): ManagerAkahuTransactionSyncSummary 
   overall: emptyManagerAkahuSyncSummaryCounts(),
 })
 
+const flushSyncControllerPromises = async () => {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 it("invokes the sync mutation only once when Start is clicked twice before rerender", async () => {
   const account = linkedAccount()
   let state = openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account])
@@ -67,20 +74,81 @@ it("invokes the sync mutation only once when Start is clicked twice before reren
   }
   expect(state._tag).toBe("confirming")
 
-  startManagerAkahuSyncController({ state, inFlightRef, setState, runTransactionSync })
-  startManagerAkahuSyncController({
-    state: openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account]),
-    inFlightRef,
-    setState,
-    runTransactionSync,
-  })
+  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
 
-  expect(syncCalls).toBe(1)
   expect(state._tag).toBe("running")
+  await Promise.resolve()
+  expect(syncCalls).toBe(1)
 
   resolveSync(summaryFor(account))
   await syncPromise
-  await Promise.resolve()
+  await flushSyncControllerPromises()
+  expect(state._tag).toBe("completed")
+})
+
+it("does not launch sync from a stale start callback after the dialog leaves confirming", async () => {
+  const account = linkedAccount()
+  let state = openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account])
+  const setState: SetManagerAkahuSyncDialogState = (next) => {
+    state = typeof next === "function" ? next(state) : next
+  }
+  const inFlightRef = { current: false }
+  let syncCalls = 0
+  const runTransactionSync: RunManagerAkahuTransactionSync = () => {
+    syncCalls += 1
+    return Promise.resolve(summaryFor(account))
+  }
+  const staleStart = () => {
+    startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+  }
+  expect(state._tag).toBe("confirming")
+
+  closeManagerAkahuSyncController(setState)
+  staleStart()
+  await flushSyncControllerPromises()
+
+  expect(syncCalls).toBe(0)
+  expect(inFlightRef.current).toBe(false)
+  expect(state._tag).toBe("closed")
+})
+
+it("recovers from a synchronous sync runner throw and allows a later valid start", async () => {
+  const account = linkedAccount()
+  let state = openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account])
+  const setState: SetManagerAkahuSyncDialogState = (next) => {
+    state = typeof next === "function" ? next(state) : next
+  }
+  const inFlightRef = { current: false }
+  let syncCalls = 0
+  const runTransactionSync: RunManagerAkahuTransactionSync = () => {
+    syncCalls += 1
+    if (syncCalls === 1) {
+      throw new Error("sync runner failed before returning a promise")
+    }
+    return Promise.resolve(summaryFor(account))
+  }
+
+  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+  expect(state._tag).toBe("running")
+  expect(inFlightRef.current).toBe(true)
+  await flushSyncControllerPromises()
+
+  expect(syncCalls).toBe(1)
+  expect(inFlightRef.current).toBe(false)
+  expect(state).toEqual({
+    _tag: "failed",
+    accounts: [account],
+    message: managerAkahuSyncFailureMessage,
+  })
+
+  setState((current) => openManagerAkahuSyncDialog(current, [account]))
+  expect(state._tag).toBe("confirming")
+  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+  await flushSyncControllerPromises()
+
+  expect(syncCalls).toBe(2)
+  expect(inFlightRef.current).toBe(false)
   expect(state._tag).toBe("completed")
 })
 
