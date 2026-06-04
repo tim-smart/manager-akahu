@@ -122,6 +122,15 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Linked-account setup discovery now records Manager account `currency` and `canHavePendingTransactions`, and reports Manager bank/cash accounts whose stored `Akahu Account` selection no longer matches a current Akahu account as non-blocking stale selections.
 - The website atom now returns setup state, and `apps/website/src/main.tsx` renders loading/setup/error/ready states, stale warnings, retry buttons for retryable states, and the ready linked-account list without sync controls. Focused website tests cover linked metadata, stale selections, and setup-state classification.
 
+### Task 4 pure sync helper findings
+
+- `packages/manager-api/src/ManagerAkahuTransactionSync.ts` now contains the pure deterministic transaction sync helpers. It is independent of React, Atom, Manager client instances, and ApiClient, while reusing `buildManagerSuspenseImportDecision` for the Manager-compatible receipt/payment/zero/unsupported import boundary.
+- Manager date formatting preserves the leading Akahu ISO calendar date when a date string is provided, including offset/near-midnight strings such as `2026-06-05T00:30:00.000+13:00`. Already-decoded `DateTime.Utc` values are formatted by UTC calendar date because the original source offset/calendar spelling is no longer available.
+- Akahu/Manager sync amount normalization accepts decimal strings or Effect `BigDecimal` values, rejects invalid decimal text, does not accept JavaScript `number` inputs, and emits fixed two-decimal strings using half-from-zero rounding for values with more than two decimal places.
+- Pending fingerprints use `akahu-pending:v1:{akahuAccountId}:{yyyy-mm-dd}:{amount}:{normalizedDescription}` with the normalized two-decimal signed amount and descriptions trimmed, lowercased, and whitespace-collapsed.
+- The helper exposes receipt/payment `fdxTransactionId` lookup sets, settled duplicate decisions by Akahu settled transaction ID, exact pending fingerprint create/update/ambiguous decisions, conservative pending-to-settled matching, and immutable summary count accumulation for every count listed in this specification.
+- Pending-to-settled candidate matching only matches existing Manager line amounts that are strings, so future sync service code does not accidentally stringify Manager numeric amounts through binary floating point. A numeric Manager amount is conservatively treated as no match until a stable decimal source is available.
+
 ## Requirements
 
 ### Setup-state UI
@@ -572,12 +581,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the current defect boundary: do not reintroduce `Cause.pretty`/regex credential detection, `Effect.orDie` around Akahu reads, or broad `catchCause` handling that would collapse defects into generic setup states. (completed)
 - Validation: not rerun for this review-only specification update; the reviewed task already records focused website setup-flow tests, server Akahu RPC tests, and affected domain/server/website builds passing.
 
-### Task 4: Pure transaction sync helpers with tests
+### Task 4: Pure transaction sync helpers with tests (completed)
 
-- Add a pure helper module independent of React, Atom, Manager client, and ApiClient.
-- Include date formatting, decimal normalization, amount classification, pending fingerprint generation, payload construction, fdxTransactionId lookup, settled duplicate decisions, pending create/update decisions, pending-to-settled matching, and summary accumulation.
-- Add unit tests alongside the helpers.
-- Validation: helper tests and build/typecheck pass.
+- Add a pure helper module independent of React, Atom, Manager client, and ApiClient. (completed)
+- Include date formatting, decimal normalization, amount classification, pending fingerprint generation, payload construction through the existing Manager compatibility boundary, fdxTransactionId lookup, settled duplicate decisions, pending create/update decisions, pending-to-settled matching, and summary accumulation. (completed)
+- Add unit tests alongside the helpers. (completed)
+- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests"`, `pnpm --filter @app/manager-api build`, and `pnpm build` pass. `pnpm build` still reports the pre-existing Effect suggestion in `apps/website/src/Manager/Flows.ts` about `Effect.orElseSucceed`, but exits successfully.
 
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 

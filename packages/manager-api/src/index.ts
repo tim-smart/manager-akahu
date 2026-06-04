@@ -1,4 +1,5 @@
 export * from "./ManagerClient.ts"
+export * from "./ManagerAkahuTransactionSync.ts"
 export * from "./ManagerBatchPagination.ts"
 export * from "./ManagerCompatibility.ts"
 
