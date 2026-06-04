@@ -719,6 +719,14 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add focused mocked tests for a stream that emits at least one successfully created settled transaction before failing, and for repeated existing overlap IDs before an older new transaction if unique-overlap tracking is adopted. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass.
 
+### Task 5 follow-up review follow-up audit: Remove settled stream runtime workaround
+
+- Replace the settled stream loop in `apps/website/src/Manager/SyncFlows.ts` with an implementation that does not rely on inverted `Stream.runForEachWhile` truthiness or singleton `Stream.rechunk(1)` behavior. The current code returns `true` for the processor's explicit `stop` result and documents a pinned-runtime chunk workaround, which is brittle against Effect's public `runForEachWhile` contract and makes the five-overlap policy harder to reason about. Prefer a stream primitive with natural stop semantics, such as processing through `Stream.takeUntilEffect(...).pipe(Stream.runDrain)`, or an explicit pull loop if that is the only clear way to stop without reading older transactions.
+- Make the settled account processor a direct state-transition boundary instead of a relocated large callback. Keep the canonical shape close to `step(state, transaction) -> Effect<{ state, shouldStop }>`: it should own count/set updates and the five-overlap stop decision, while stream orchestration only feeds transactions into `step`, stores the returned state, and stops when `shouldStop` is true. Remove unused result fields such as the current stop `reason` unless they are surfaced in summaries, logging, or UI state.
+- Collapse the duplicated receipt/payment Manager write branches inside the processor. A single helper should map the classified create decision to the Manager endpoint, created-count key, POST payload, write-error handling, and created `fdxTransactionId` update, leaving zero and unsupported transactions as the only distinct skip branches. This keeps future write-policy changes from being duplicated across receipt and payment paths.
+- Preserve the completed behavior from the prior task: unique existing-overlap IDs, partial summaries after stream failure, no import after the fifth unique existing overlap, and repeated existing IDs not consuming multiple overlap slots.
+- Validation: run `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build`.
+
 ### Task 6: Pending-transaction sync service extension with mocked tests
 
 - Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true.
