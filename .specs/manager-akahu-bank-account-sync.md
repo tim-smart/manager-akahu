@@ -455,6 +455,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Update focused tests to cover the shared pager through both receipt and payment paths, the combined sync-read helper, duplicate `fdxTransactionId` values beyond the first page in both resource types, and the expected request sequences. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
+### Task 2 follow-up review: Simplify Manager batch page-size boundary
+
+- Revisit `ManagerBankOrCashAccountBatchReadInput.pageSize`. It currently exposes what appears to be a test/configuration knob on the production public sync-read API, so every future caller inherits an optional pagination mode even though normal sync code should use one canonical Manager page size.
+- Prefer the code-judo simplification: remove `pageSize` from the public read input and keep `managerBatchReadDefaultPageSize` as the only production path. Focused tests can still exercise multi-page behavior by returning full default-size pages from mocks, which deletes the invalid-page-size branch and the public contract surface entirely.
+- If a real production caller needs configurable page sizes, model the boundary explicitly instead of throwing a raw `RangeError` inside `Effect.gen`. Add a small typed Manager pagination input error, return it in the Effect error channel, and update tests to assert the typed failure. Invalid public input should not escape as an untyped defect that future sync orchestration cannot report through normal Effect error handling.
+- Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
+
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary
 
 - Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly.
