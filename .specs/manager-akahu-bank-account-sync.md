@@ -656,6 +656,14 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add a focused type/runtime regression that the public decoded type's `calendarDate` is the shared `CalendarDate` type and that decoding still returns a nominal Akahu date value whose raw string encodes back unchanged. Preserve the intentional unsafe test escape hatch only for tests that need inconsistent structural values. (completed)
 - Validation: `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, and `pnpm --filter @app/manager-api build` pass.
 
+### Task 4 follow-up review follow-up audit follow-up review follow-up review follow-up: Remove production nominal-guard scaffolding
+
+- Delete the `AssertTrue`, `AkahuTransactionDateValueShape`, and `AkahuTransactionDateValue.nominalGuard` scaffolding from `packages/domain/src/Akahu.ts`. The Effect `Schema.Class` brand parameter is the nominal boundary; the extra static type assertion is test-only proof embedded in the production schema module and adds concepts without improving runtime behavior or schema clarity.
+- Keep the decoded date model direct: `AkahuTransactionDateValue` should declare only the schema fields and the schema-class brand parameter. Do not replace the removed guard with another production-only phantom assertion, wrapper, or private declaration-only nominal field.
+- Preserve the focused nominality regression in `packages/domain/tests/Akahu.test.ts` or move any additional type-only proof into tests/typetests. The production domain file should not need a self-test helper to prove that structural `{ raw, calendarDate }` objects are rejected.
+- Keep the existing single fallible raw-string transform, the shared `CalendarDate` field schema, and the Manager-side date separation unchanged.
+- Validation: run `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, and `pnpm --filter @app/manager-api build`.
+
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
 - Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
