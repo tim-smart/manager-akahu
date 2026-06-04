@@ -1,5 +1,4 @@
-import { BigDecimal, DateTime, Option } from "effect"
-import type { ItemOfPayment, ItemOfReceipt } from "./ManagerClient.ts"
+import { BigDecimal, Option } from "effect"
 import {
   buildManagerSuspenseImportDecision,
   type ManagerBankAccountCurrencyImportDecision,
@@ -7,6 +6,10 @@ import {
   type ManagerLineAmount,
   type ManagerSuspenseImportDecision,
 } from "./ManagerCompatibility.ts"
+import type {
+  ManagerBankOrCashAccountSyncRead,
+  ManagerExistingFdxTransactionIdEntry,
+} from "./ManagerBatchPagination.ts"
 
 export const managerAkahuPendingFingerprintPrefix = "akahu-pending:v1:" as const
 
@@ -32,30 +35,11 @@ export type ManagerAkahuSyncSummaryCounts = Record<ManagerAkahuSyncSummaryCountK
 
 export type ManagerAkahuDecimalInput = string | BigDecimal.BigDecimal
 
-export type ManagerAkahuDateInput = string | DateTime.DateTime
+export type ManagerAkahuDateInput =
+  | { readonly _tag: "managerDate"; readonly date: string }
+  | { readonly _tag: "rawAkahuDate"; readonly date: string }
 
 export type ManagerAkahuTransactionKind = "receipt" | "payment"
-
-export type ManagerAkahuExistingFdxTransactionIdEntry =
-  | {
-      readonly _tag: "receipt"
-      readonly fdxTransactionId: string
-      readonly key: string
-      readonly receipt: ItemOfReceipt
-    }
-  | {
-      readonly _tag: "payment"
-      readonly fdxTransactionId: string
-      readonly key: string
-      readonly payment: ItemOfPayment
-    }
-
-export interface ManagerAkahuFdxTransactionIdLookup {
-  readonly receiptFdxTransactionIds: ReadonlySet<string>
-  readonly paymentFdxTransactionIds: ReadonlySet<string>
-  readonly entries: ReadonlyArray<ManagerAkahuExistingFdxTransactionIdEntry>
-  readonly index: ReadonlyMap<string, ReadonlyArray<ManagerAkahuExistingFdxTransactionIdEntry>>
-}
 
 export type ManagerAkahuAmountNormalizationDecision =
   | { readonly _tag: "amount"; readonly amount: ManagerLineAmount }
@@ -109,7 +93,7 @@ export type ManagerAkahuSettledDuplicateDecision =
   | {
       readonly _tag: "duplicate"
       readonly akahuTransactionId: string
-      readonly entries: ReadonlyArray<ManagerAkahuExistingFdxTransactionIdEntry>
+      readonly entries: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
     }
   | { readonly _tag: "create"; readonly akahuTransactionId: string }
 
@@ -118,17 +102,18 @@ export type ManagerAkahuPendingExactFingerprintDecision =
   | {
       readonly _tag: "update"
       readonly fingerprint: string
-      readonly entry: ManagerAkahuExistingFdxTransactionIdEntry
+      readonly entry: ManagerExistingFdxTransactionIdEntry
     }
   | {
       readonly _tag: "ambiguous"
       readonly fingerprint: string
-      readonly entries: ReadonlyArray<ManagerAkahuExistingFdxTransactionIdEntry>
+      readonly entries: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
       readonly warning: string
     }
 
 export interface ManagerAkahuPendingToSettledMatchInput {
-  readonly existingEntries: ReadonlyArray<ManagerAkahuExistingFdxTransactionIdEntry>
+  readonly bankOrCashAccountKey: string
+  readonly syncRead: ManagerBankOrCashAccountSyncRead
   readonly settledDate: ManagerAkahuDateInput
   readonly settledSignedAmount: ManagerAkahuDecimalInput
   readonly settledDescription: string
@@ -136,11 +121,11 @@ export interface ManagerAkahuPendingToSettledMatchInput {
 }
 
 export type ManagerAkahuPendingToSettledMatchDecision =
-  | { readonly _tag: "match"; readonly entry: ManagerAkahuExistingFdxTransactionIdEntry }
+  | { readonly _tag: "match"; readonly entry: ManagerExistingFdxTransactionIdEntry }
   | { readonly _tag: "none" }
   | {
       readonly _tag: "ambiguous"
-      readonly candidates: ReadonlyArray<ManagerAkahuExistingFdxTransactionIdEntry>
+      readonly candidates: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
       readonly warning: string
     }
   | { readonly _tag: "unsupported"; readonly warning: string }
@@ -181,17 +166,24 @@ export const addManagerAkahuSyncSummaryCounts = (
   return next
 }
 
-export const formatManagerAkahuDate = (date: ManagerAkahuDateInput): string => {
-  if (typeof date === "string") {
-    const match = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/.exec(date.trim())
-    if (match !== null) {
-      return match[1]
-    }
+const managerDatePattern = /^\d{4}-\d{2}-\d{2}$/
 
-    return DateTime.formatIsoDateUtc(DateTime.makeUnsafe(date))
+export const formatManagerAkahuDate = (input: ManagerAkahuDateInput): string => {
+  const date = input.date.trim()
+  if (input._tag === "managerDate") {
+    if (!managerDatePattern.test(date)) {
+      throw new Error(`Manager date must be yyyy-mm-dd: ${input.date}`)
+    }
+    return date
   }
 
-  return DateTime.formatIsoDateUtc(date)
+  const match = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/.exec(date)
+  const calendarDate = match?.[1]
+  if (calendarDate !== undefined) {
+    return calendarDate
+  }
+
+  throw new Error(`Raw Akahu date must start with yyyy-mm-dd: ${input.date}`)
 }
 
 const toBigDecimal = (
@@ -300,78 +292,14 @@ export const classifyManagerAkahuSuspenseImport = (
   return { _tag: "unsupported", warning: managerDecision.reason.warning }
 }
 
-const appendExistingFdxTransactionIdEntry = (
-  index: Map<string, Array<ManagerAkahuExistingFdxTransactionIdEntry>>,
-  entry: ManagerAkahuExistingFdxTransactionIdEntry,
-) => {
-  const existing = index.get(entry.fdxTransactionId)
-  if (existing === undefined) {
-    index.set(entry.fdxTransactionId, [entry])
-    return
-  }
-
-  existing.push(entry)
-}
-
-export const buildManagerAkahuFdxTransactionIdLookup = (input: {
-  readonly receipts: ReadonlyArray<ItemOfReceipt>
-  readonly payments: ReadonlyArray<ItemOfPayment>
-}): ManagerAkahuFdxTransactionIdLookup => {
-  const receiptFdxTransactionIds = new Set<string>()
-  const paymentFdxTransactionIds = new Set<string>()
-  const entries: Array<ManagerAkahuExistingFdxTransactionIdEntry> = []
-  const index = new Map<string, Array<ManagerAkahuExistingFdxTransactionIdEntry>>()
-
-  for (const receipt of input.receipts) {
-    const fdxTransactionId = receipt.item.fdxTransactionId
-    if (fdxTransactionId == null || fdxTransactionId === "") {
-      continue
-    }
-
-    const entry: ManagerAkahuExistingFdxTransactionIdEntry = {
-      _tag: "receipt",
-      fdxTransactionId,
-      key: receipt.key,
-      receipt,
-    }
-    receiptFdxTransactionIds.add(fdxTransactionId)
-    entries.push(entry)
-    appendExistingFdxTransactionIdEntry(index, entry)
-  }
-
-  for (const payment of input.payments) {
-    const fdxTransactionId = payment.item.fdxTransactionId
-    if (fdxTransactionId == null || fdxTransactionId === "") {
-      continue
-    }
-
-    const entry: ManagerAkahuExistingFdxTransactionIdEntry = {
-      _tag: "payment",
-      fdxTransactionId,
-      key: payment.key,
-      payment,
-    }
-    paymentFdxTransactionIds.add(fdxTransactionId)
-    entries.push(entry)
-    appendExistingFdxTransactionIdEntry(index, entry)
-  }
-
-  return {
-    receiptFdxTransactionIds,
-    paymentFdxTransactionIds,
-    entries,
-    index: new Map(index),
-  }
-}
-
 export const isAkahuPendingFdxTransactionId = (fdxTransactionId: string): boolean =>
   fdxTransactionId.startsWith(managerAkahuPendingFingerprintPrefix)
 
 export const decideSettledDuplicateByAkahuTransactionId = (
-  lookup: ManagerAkahuFdxTransactionIdLookup,
+  syncRead: ManagerBankOrCashAccountSyncRead,
   akahuTransactionId: string,
 ): ManagerAkahuSettledDuplicateDecision => {
-  const entries = lookup.index.get(akahuTransactionId) ?? []
+  const entries = syncRead.existingFdxTransactionIdIndex.get(akahuTransactionId) ?? []
   if (entries.length > 0) {
     return { _tag: "duplicate", akahuTransactionId, entries }
   }
@@ -380,10 +308,10 @@ export const decideSettledDuplicateByAkahuTransactionId = (
 }
 
 export const decidePendingExactFingerprint = (
-  lookup: ManagerAkahuFdxTransactionIdLookup,
+  syncRead: ManagerBankOrCashAccountSyncRead,
   fingerprint: string,
 ): ManagerAkahuPendingExactFingerprintDecision => {
-  const entries = lookup.index.get(fingerprint) ?? []
+  const entries = syncRead.existingFdxTransactionIdIndex.get(fingerprint) ?? []
   if (entries.length === 0) {
     return { _tag: "create", fingerprint }
   }
@@ -399,20 +327,24 @@ export const decidePendingExactFingerprint = (
   }
 }
 
-const getEntryKind = (
-  entry: ManagerAkahuExistingFdxTransactionIdEntry,
-): ManagerAkahuTransactionKind => entry._tag
+const getEntryKind = (entry: ManagerExistingFdxTransactionIdEntry): ManagerAkahuTransactionKind =>
+  entry._tag
 
-const getEntryItem = (entry: ManagerAkahuExistingFdxTransactionIdEntry) =>
+const getEntryItem = (entry: ManagerExistingFdxTransactionIdEntry) =>
   entry._tag === "receipt" ? entry.receipt.item : entry.payment.item
 
-const getEntryLineAmount = (entry: ManagerAkahuExistingFdxTransactionIdEntry): unknown =>
+const getEntryLineAmount = (entry: ManagerExistingFdxTransactionIdEntry): unknown =>
   getEntryItem(entry).lines?.[0]?.amount
 
-const getEntryDescription = (entry: ManagerAkahuExistingFdxTransactionIdEntry): string => {
+const getEntryDescription = (entry: ManagerExistingFdxTransactionIdEntry): string => {
   const item = getEntryItem(entry)
   return item.description ?? item.lines?.[0]?.lineDescription ?? ""
 }
+
+const getEntryBankOrCashAccountKey = (
+  entry: ManagerExistingFdxTransactionIdEntry,
+): string | null | undefined =>
+  entry._tag === "receipt" ? entry.receipt.item.receivedIn : entry.payment.item.paidFrom
 
 const calendarDayNumber = (date: string): number => {
   const [year, month, day] = date.split("-").map(Number)
@@ -445,10 +377,13 @@ export const decidePendingToSettledMatch = (
   const dateWindowDays = input.dateWindowDays ?? 3
   const settledDescription = normalizeAkahuTransactionDescription(input.settledDescription)
   const settledAbsoluteAmount = getAbsoluteManagerAkahuAmount(settledAmount.amount)
-  const candidates: Array<ManagerAkahuExistingFdxTransactionIdEntry> = []
+  const candidates: Array<ManagerExistingFdxTransactionIdEntry> = []
 
-  for (const entry of input.existingEntries) {
+  for (const entry of input.syncRead.existingFdxTransactionIdEntries) {
     if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
+      continue
+    }
+    if (getEntryBankOrCashAccountKey(entry) !== input.bankOrCashAccountKey) {
       continue
     }
     if (getEntryKind(entry) !== settledKind) {
@@ -475,7 +410,10 @@ export const decidePendingToSettledMatch = (
     const entryDate = getEntryItem(entry).date
     if (
       entryDate === undefined ||
-      Math.abs(calendarDayNumber(formatManagerAkahuDate(entryDate)) - settledDay) > dateWindowDays
+      Math.abs(
+        calendarDayNumber(formatManagerAkahuDate({ _tag: "managerDate", date: entryDate })) -
+          settledDay,
+      ) > dateWindowDays
     ) {
       continue
     }
