@@ -126,6 +126,12 @@ export type ManagerAkahuPendingToSettledMatchDecision =
     }
   | { readonly _tag: "unsupported"; readonly warning: string }
 
+export interface ManagerAkahuStalePendingEntriesInput {
+  readonly syncRead: ManagerBankOrCashAccountSyncRead
+  readonly currentPendingFdxTransactionIds: ReadonlySet<string>
+  readonly processedFdxTransactionIds: ReadonlySet<string>
+}
+
 export const emptyManagerAkahuSyncSummaryCounts = (): ManagerAkahuSyncSummaryCounts => ({
   settledFetched: 0,
   pendingFetched: 0,
@@ -302,6 +308,16 @@ export const decidePendingExactFingerprint = (
     warning: `Found ${entries.length} existing pending Manager entries with fingerprint ${fingerprint}.`,
   }
 }
+
+export const decideStalePendingEntries = (
+  input: ManagerAkahuStalePendingEntriesInput,
+): ReadonlyArray<ManagerExistingFdxTransactionIdEntry> =>
+  input.syncRead.existingFdxTransactionIdEntries.filter(
+    (entry) =>
+      isAkahuPendingFdxTransactionId(entry.fdxTransactionId) &&
+      !input.currentPendingFdxTransactionIds.has(entry.fdxTransactionId) &&
+      !input.processedFdxTransactionIds.has(entry.fdxTransactionId),
+  )
 
 const getEntryKind = (entry: ManagerExistingFdxTransactionIdEntry): ManagerAkahuTransactionKind =>
   entry._tag

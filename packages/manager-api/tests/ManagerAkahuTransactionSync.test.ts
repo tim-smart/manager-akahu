@@ -9,6 +9,7 @@ import {
   decidePendingExactFingerprint,
   decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
+  decideStalePendingEntries,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
   managerAkahuPendingFingerprintPrefix,
@@ -234,6 +235,30 @@ test("decides pending create, update, and ambiguous exact fingerprint matches", 
     payments: [pendingPayment("payment-1", { fdxTransactionId: fingerprint })],
   })
   expect(decidePendingExactFingerprint(ambiguous, fingerprint)._tag).toBe("ambiguous")
+})
+
+test("decides stale Akahu-created pending entries absent from current pending results", () => {
+  const currentFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:12.34:current coffee`
+  const processedFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:15.00:processed lunch`
+  const staleReceiptFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:8.50:stale receipt`
+  const stalePaymentFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:-9.99:stale payment`
+  const syncRead = managerSyncRead({
+    receipts: [
+      receiptItem("receipt-settled", { fdxTransactionId: "akahu-settled-1" }),
+      pendingReceipt("receipt-current", { fdxTransactionId: currentFingerprint }),
+      pendingReceipt("receipt-processed", { fdxTransactionId: processedFingerprint }),
+      pendingReceipt("receipt-stale", { fdxTransactionId: staleReceiptFingerprint }),
+    ],
+    payments: [pendingPayment("payment-stale", { fdxTransactionId: stalePaymentFingerprint })],
+  })
+
+  expect(
+    decideStalePendingEntries({
+      syncRead,
+      currentPendingFdxTransactionIds: new Set([currentFingerprint]),
+      processedFdxTransactionIds: new Set([processedFingerprint]),
+    }).map((entry) => entry.key),
+  ).toEqual(["receipt-stale", "payment-stale"])
 })
 
 test("safely matches exactly one pending candidate to a settled transaction", () => {

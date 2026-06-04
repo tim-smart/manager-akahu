@@ -9,9 +9,9 @@ import {
   decidePendingExactFingerprint,
   decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
+  decideStalePendingEntries,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
-  isAkahuPendingFdxTransactionId,
   type ManagerAkahuSuspenseImportClassification,
   type ManagerAkahuSyncSummaryCounts,
 } from "@app/manager-api/ManagerAkahuTransactionSync"
@@ -85,7 +85,6 @@ interface ManagerAkahuTransactionSyncAccountState {
   readonly warnings: ReadonlyArray<string>
   readonly errors: ReadonlyArray<string>
   readonly processedFdxTransactionIds: ReadonlySet<string>
-  readonly currentPendingFdxTransactionIds: ReadonlySet<string>
 }
 
 interface ManagerAkahuSettledPhaseState {
@@ -96,6 +95,11 @@ interface ManagerAkahuSettledPhaseState {
 interface ManagerAkahuSettledPhaseStep {
   readonly state: ManagerAkahuSettledPhaseState
   readonly shouldStop: boolean
+}
+
+interface ManagerAkahuPendingPhaseStep {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly currentPendingFdxTransactionId?: string | undefined
 }
 
 type ManagerAkahuTransactionCreateClassification = Extract<
@@ -282,6 +286,7 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
 }) {
   let state = input.state
   let failed = false
+  const currentPendingFdxTransactionIds = new Set<string>()
 
   yield* input.input
     .fetchPendingTransactions({
@@ -292,11 +297,15 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
     .pipe(
       Stream.runForEach((transaction) =>
         Effect.gen(function* () {
-          state = yield* processManagerAkahuPendingTransaction({
+          const step = yield* processManagerAkahuPendingTransaction({
             context: input.context,
             state,
             transaction,
           })
+          state = step.state
+          if (step.currentPendingFdxTransactionId !== undefined) {
+            currentPendingFdxTransactionIds.add(step.currentPendingFdxTransactionId)
+          }
         }),
       ),
       Effect.catch((error) => {
@@ -310,6 +319,7 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
     state = detectManagerAkahuStalePendingEntries({
       state,
       syncRead: input.context.syncRead,
+      currentPendingFdxTransactionIds,
     })
   }
 
@@ -487,7 +497,7 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     readonly context: ManagerAkahuTransactionSyncAccountContext
     readonly state: ManagerAkahuTransactionSyncAccountState
     readonly transaction: PendingTransaction
-  }) {
+  }): Effect.fn.Return<ManagerAkahuPendingPhaseStep> {
     const { account, client, importabilityDecision, syncRead } = input.context
     const transaction = input.transaction
     const description = transaction.description
@@ -503,16 +513,16 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     if (fingerprintDecision._tag === "unsupported") {
       state = addManagerAkahuTransactionSyncAccountWarning(state, fingerprintDecision.warning)
       state = incrementManagerAkahuTransactionSyncAccountCount(state, "unsupportedSkipped")
-      return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+      return { state: incrementManagerAkahuTransactionSyncAccountCount(state, "warnings") }
     }
 
-    state = addManagerAkahuTransactionSyncAccountCurrentPendingFdxTransactionId(
-      state,
-      fingerprintDecision.fingerprint,
-    )
+    const currentPendingFdxTransactionId = fingerprintDecision.fingerprint
 
     if (state.processedFdxTransactionIds.has(fingerprintDecision.fingerprint)) {
-      return incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
+      return {
+        state: incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped"),
+        currentPendingFdxTransactionId,
+      }
     }
 
     const exactFingerprintDecision = decidePendingExactFingerprint(
@@ -523,7 +533,10 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     if (exactFingerprintDecision._tag === "ambiguous") {
       state = addManagerAkahuTransactionSyncAccountWarning(state, exactFingerprintDecision.warning)
       state = incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
-      return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+      return {
+        state: incrementManagerAkahuTransactionSyncAccountCount(state, "warnings"),
+        currentPendingFdxTransactionId,
+      }
     }
 
     const classification = classifyManagerAkahuSuspenseImport({
@@ -540,29 +553,39 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     switch (classification._tag) {
       case "receipt":
       case "payment":
-        return exactFingerprintDecision._tag === "create"
-          ? yield* createManagerAkahuTransaction({
-              state,
-              client,
-              fdxTransactionId: fingerprintDecision.fingerprint,
-              classification,
-              successCounts: ["pendingCreated"],
-            })
-          : yield* updateManagerAkahuAccountStateFromClassifiedUpdate({
-              state,
-              client,
-              classification,
-              entry: exactFingerprintDecision.entry,
-              kindMismatchWarning: `Existing pending Manager entry ${exactFingerprintDecision.entry.key} has a different transaction type than its fingerprint.`,
-              processedFdxTransactionIds: [fingerprintDecision.fingerprint],
-              successCount: "pendingUpdated",
-            })
+        return {
+          state:
+            exactFingerprintDecision._tag === "create"
+              ? yield* createManagerAkahuTransaction({
+                  state,
+                  client,
+                  fdxTransactionId: fingerprintDecision.fingerprint,
+                  classification,
+                  successCounts: ["pendingCreated"],
+                })
+              : yield* updateManagerAkahuAccountStateFromClassifiedUpdate({
+                  state,
+                  client,
+                  classification,
+                  entry: exactFingerprintDecision.entry,
+                  kindMismatchWarning: `Existing pending Manager entry ${exactFingerprintDecision.entry.key} has a different transaction type than its fingerprint.`,
+                  processedFdxTransactionIds: [fingerprintDecision.fingerprint],
+                  successCount: "pendingUpdated",
+                }),
+          currentPendingFdxTransactionId,
+        }
       case "zero":
-        return incrementManagerAkahuTransactionSyncAccountCount(state, "zeroAmountSkipped")
+        return {
+          state: incrementManagerAkahuTransactionSyncAccountCount(state, "zeroAmountSkipped"),
+          currentPendingFdxTransactionId,
+        }
       case "unsupported":
         state = addManagerAkahuTransactionSyncAccountWarning(state, classification.warning)
         state = incrementManagerAkahuTransactionSyncAccountCount(state, "unsupportedSkipped")
-        return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+        return {
+          state: incrementManagerAkahuTransactionSyncAccountCount(state, "warnings"),
+          currentPendingFdxTransactionId,
+        }
     }
   },
 )
@@ -635,7 +658,6 @@ const initialManagerAkahuTransactionSyncAccountState =
     warnings: [],
     errors: [],
     processedFdxTransactionIds: new Set(),
-    currentPendingFdxTransactionIds: new Set(),
   })
 
 const incrementManagerAkahuTransactionSyncAccountCount = (
@@ -671,33 +693,18 @@ const addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId = (
   processedFdxTransactionIds: new Set(state.processedFdxTransactionIds).add(fdxTransactionId),
 })
 
-const addManagerAkahuTransactionSyncAccountCurrentPendingFdxTransactionId = (
-  state: ManagerAkahuTransactionSyncAccountState,
-  fdxTransactionId: string,
-): ManagerAkahuTransactionSyncAccountState => ({
-  ...state,
-  currentPendingFdxTransactionIds: new Set(state.currentPendingFdxTransactionIds).add(
-    fdxTransactionId,
-  ),
-})
-
 const detectManagerAkahuStalePendingEntries = (input: {
   readonly state: ManagerAkahuTransactionSyncAccountState
   readonly syncRead: ManagerBankOrCashAccountSyncRead
+  readonly currentPendingFdxTransactionIds: ReadonlySet<string>
 }): ManagerAkahuTransactionSyncAccountState => {
   let state = input.state
 
-  for (const entry of input.syncRead.existingFdxTransactionIdEntries) {
-    if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
-      continue
-    }
-    if (state.currentPendingFdxTransactionIds.has(entry.fdxTransactionId)) {
-      continue
-    }
-    if (state.processedFdxTransactionIds.has(entry.fdxTransactionId)) {
-      continue
-    }
-
+  for (const entry of decideStalePendingEntries({
+    syncRead: input.syncRead,
+    currentPendingFdxTransactionIds: input.currentPendingFdxTransactionIds,
+    processedFdxTransactionIds: state.processedFdxTransactionIds,
+  })) {
     state = addManagerAkahuTransactionSyncAccountWarning(
       state,
       `Stale Akahu pending Manager ${entry._tag} ${entry.key} (${entry.fdxTransactionId}) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.`,
