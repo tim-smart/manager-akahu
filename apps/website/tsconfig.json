@@ -7,7 +7,10 @@
     "types": ["vite/client"],
     "jsx": "react-jsx",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@app/domain/*": ["../../packages/domain/src/*"],
+      "@app/manager-api": ["../../packages/manager-api/src/index.ts"],
+      "@app/manager-api/*": ["../../packages/manager-api/src/*"]
     },
 
     /* Bundler mode */
