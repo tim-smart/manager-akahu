@@ -393,6 +393,15 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Add small tests for constants/payload builders where practical.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, `pnpm build`, and `pnpm ready` pass.
 
+### Task 1 follow-up: Tighten Manager compatibility API shape
+
+- Refactor `ManagerCompatibility.ts` so payload builders return precise local payload types with required `value` objects instead of the broad generated `ManagerPostReceipt`/`ManagerPostPayment` shapes whose `value` field is optional. The current return type erases the builder invariant and already forces `payload.value!` in tests; downstream sync code should not need non-null assertions for a payload this module just constructed.
+- Make the amount boundary stricter before sync code depends on it. Prefer accepting a normalized decimal string/line amount from the future decimal helper rather than `number | string`, or otherwise make the conversion owner explicit. This avoids baking binary-floating-point-friendly inputs into the canonical Manager write helper.
+- Delete the exported `managerSuspenseReceiptValueCanOmitPaidBy` and `managerSuspensePaymentValueCanOmitPayee` helpers. They are thin wrappers around `value.paidBy === undefined` / `value.payee === undefined`, add public API surface without clarifying production code, and can be replaced by direct payload-shape assertions in tests.
+- Consider a code-judo consolidation that exposes one canonical Manager suspense import decision/builder taking the signed Akahu amount, normalized amount string, clearance, and account key, then returns a discriminated receipt/payment payload or an explicit skip decision. This would keep positive/negative receipt/payment branching, absolute-value handling, and zero/unsupported decisions out of later orchestration code instead of scattering ad-hoc conditionals across the sync service.
+- Move the compatibility tests out of `packages/manager-api/tests/index.test.ts` into a focused `ManagerCompatibility.test.ts`, leaving `index.test.ts` as a barrel/package-name smoke test. The current test file is already becoming a grab bag and will grow harder to scan as more compatibility cases are added.
+- Validation: run `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and the repository validation command that remains current for this branch.
+
 ### Task 2: Pagination foundations
 
 - Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present.
