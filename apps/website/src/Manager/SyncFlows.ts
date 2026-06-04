@@ -26,8 +26,11 @@ import {
   type ManagerSuspenseReceiptValue,
 } from "@app/manager-api/ManagerCompatibility"
 import type { Client } from "@app/manager-api/ManagerClient"
-import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
-import { AkahuTokens as AkahuTokensSchema } from "@app/domain/Manager/AkahuCustomFields"
+import { Context, Effect, Layer, Schema, Stream } from "effect"
+import {
+  decodeManagerAkahuBusinessDetailTokens,
+  findManagerAkahuCredentialFields,
+} from "./AkahuCredentials"
 
 export type ManagerAkahuTransactionSyncManagerClient = ManagerBankOrCashAccountSyncReadClient &
   Pick<Client, "POST/api4/receipt" | "POST/api4/payment" | "PUT/api4/receipt" | "PUT/api4/payment">
@@ -796,38 +799,27 @@ const readManagerAkahuSyncTokens = Effect.fn("readManagerAkahuSyncTokens")(funct
   client: Pick<Client, "GET/api4/text-custom-field-batch" | "GET/api4/business-details">,
 ) {
   const fields = (yield* client["GET/api4/text-custom-field-batch"]()).items ?? []
-  const akahuAppTokenField = fields.find((field) => field.item.name === "Akahu App Token")
-  const akahuUserTokenField = fields.find((field) => field.item.name === "Akahu User Token")
+  const credentialFields = findManagerAkahuCredentialFields(fields)
 
-  if (akahuAppTokenField === undefined || akahuUserTokenField === undefined) {
+  if (credentialFields.missingFieldNames.length > 0) {
     return yield* new ManagerAkahuTransactionSyncConfigurationError({
       message: "Akahu credential fields are missing from Manager Business Details.",
     })
   }
 
   const business = yield* client["GET/api4/business-details"]()
-  const strings = business.customFields2?.strings ?? {}
-  const akahuAppToken = getCredentialValue(strings[akahuAppTokenField.key])
-  const akahuUserToken = getCredentialValue(strings[akahuUserTokenField.key])
-
-  if (akahuAppToken === undefined || akahuUserToken === undefined) {
-    return yield* new ManagerAkahuTransactionSyncConfigurationError({
-      message: "Akahu credentials are missing from Manager Business Details.",
-    })
-  }
-
-  const tokens = Schema.decodeOption(AkahuTokensSchema)({
-    akahuAppToken,
-    akahuUserToken,
+  const tokens = decodeManagerAkahuBusinessDetailTokens({
+    fields: credentialFields,
+    strings: business.customFields2?.strings ?? {},
   })
 
-  if (Option.isNone(tokens)) {
+  if (tokens._tag === "missing") {
     return yield* new ManagerAkahuTransactionSyncConfigurationError({
       message: "Akahu credentials are missing from Manager Business Details.",
     })
   }
 
-  return tokens.value
+  return tokens.tokens
 })
 
 const buildManagerAkahuTransactionSyncSummary = (
@@ -852,12 +844,6 @@ const buildManagerAkahuTransactionSyncAccountErrorSummary = (
 
 const getAkahuTransactionDescription = (transaction: Transaction): string =>
   transaction.merchant?.name ?? transaction.description
-
-const getCredentialValue = (value: unknown): string | undefined => {
-  if (typeof value !== "string") return undefined
-  const trimmed = value.trim()
-  return trimmed === "" ? undefined : trimmed
-}
 
 const formatSyncError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)

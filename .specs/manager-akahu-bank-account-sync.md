@@ -213,6 +213,12 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Focused website sync-flow coverage now asserts `syncManagerAkahuTransactions` continues past fewer than five existing Manager overlaps and imports an older settled transaction using its older Akahu calendar date. The existing five-overlap stop tests continue to prove older transactions after the fifth unique overlap are not imported.
 - Task 8 follow-up review found no actionable structural refactor beyond keeping the settled-history policy at the Akahu/domain boundary. The current code should preserve the cursor-only settled endpoint contract and existing five-overlap sync stop policy rather than adding date-range parameters, user-configurable ranges, or client/RPC payload churn unless Akahu's documented default range changes.
 
+### Akahu credential helper findings
+
+- `apps/website/src/Manager/AkahuCredentials.ts` now owns the shared Manager Akahu credential field names, text custom-field lookup, blank-trimming rule, missing-field detection, and `AkahuTokens` schema decode boundary.
+- Setup still creates missing Manager Business Details token custom fields in `Manager/Flows.ts`; the shared helper only reads and decodes existing text field values from Business Details.
+- Sync now uses the same lookup/decode boundary as setup while preserving the existing sync error distinction between missing text custom fields and missing/blank credential values. Token values remain confined to service calls and are not added to UI state, warnings, or logs.
+
 ## Requirements
 
 ### Setup-state UI
@@ -758,13 +764,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add mocked tests for settled receipt/payment payloads, duplicate skipping, zero skipping, and summary counts. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` passes; `pnpm --filter website build` passes.
 
-### Task 5 follow-up review: Stream settled overlap boundary and clean sync orchestration (partially completed)
+### Task 5 follow-up review: Stream settled overlap boundary and clean sync orchestration (completed)
 
 - Rework `apps/website/src/Manager/SyncFlows.ts` so settled transactions are processed incrementally instead of collecting the whole stream with `Stream.runCollect` before processing. The current structure cannot enforce the required five-overlap settled-history stop: after the fifth duplicate, older non-overlapping transactions are still imported. Prefer a single account-level settled stream processor with an accumulator for counts, warnings, errors, created fdx IDs, and overlap count, and terminate before importing transactions older than the fifth overlap. (completed for the settled five-overlap boundary)
 - Add focused mocked tests for the settled-history boundary: five existing duplicates followed by an older new transaction must not POST the older transaction, while fewer than five duplicates followed by an older new transaction must still import it. Keep existing duplicate, zero, unsupported, and summary-count coverage. (completed)
 - Lift foreign-currency importability to an account-level policy before the per-transaction receipt/payment/zero branch. The current service fetches the complete Manager sync read and then emits the same unsupported-account warning once per transaction. Prefer one warning per unsupported account and a direct count strategy, such as counting fetched settled transactions as `unsupportedSkipped` without building duplicate lookup state for an account that cannot import. (completed; unsupported accounts now skip Manager receipt/payment reads and writes, emit one account-level warning, and count only fetched Akahu settled/pending rows as `unsupportedSkipped`)
-- Extract the Akahu credential field-name/value/decode boundary shared by `apps/website/src/Manager/Flows.ts` and `apps/website/src/Manager/SyncFlows.ts`. Keep setup-only custom-field creation in setup flows, but avoid duplicating hardcoded credential field names, trimming rules, and `AkahuTokens` decoding in the sync service. (not completed; outside this overlap-boundary task)
-- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass.
+- Extract the Akahu credential field-name/value/decode boundary shared by `apps/website/src/Manager/Flows.ts` and `apps/website/src/Manager/SyncFlows.ts`. Keep setup-only custom-field creation in setup flows, but avoid duplicating hardcoded credential field names, trimming rules, and `AkahuTokens` decoding in the sync service. (completed)
+- Validation: `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, and `pnpm --filter website build` pass for the credential-boundary completion.
 
 ### Task 5 follow-up review follow-up: Preserve settled stream state and extract processor (completed)
 

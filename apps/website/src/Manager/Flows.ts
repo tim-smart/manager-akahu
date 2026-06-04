@@ -1,8 +1,6 @@
 import { Manager } from "@/Manager"
-import { Context, Effect, Layer, Option, Resource, Schema } from "effect"
+import { Context, Effect, Layer, Resource } from "effect"
 import {
-  AkahuTokens,
-  type AkahuCredentialFieldName,
   LinkedAccount,
   makeManagerAkahuSetupState,
   ManagerAkahuSetupError,
@@ -14,6 +12,12 @@ import {
 import { ApiClient } from "@/ApiClient"
 import type { Account } from "@app/domain/Akahu"
 import { AkahuRpcError } from "@app/domain/rpc"
+import {
+  decodeManagerAkahuBusinessDetailTokens,
+  findManagerAkahuCredentialFields,
+  managerAkahuAppTokenFieldName,
+  managerAkahuUserTokenFieldName,
+} from "./AkahuCredentials"
 
 type ManagerAkahuAccountRecord = {
   readonly key: string
@@ -49,13 +53,14 @@ export class ManagerFlows extends Context.Service<
 
       const ensureCustomFields = Effect.gen(function* () {
         const current = yield* Resource.get(textFields)
-        let akahuAppToken = current.find((field) => field.item.name === "Akahu App Token")
+        const credentialFields = findManagerAkahuCredentialFields(current)
+        let akahuAppToken = credentialFields.akahuAppToken
         if (!akahuAppToken) {
-          akahuAppToken = yield* createTextField("Akahu App Token")
+          akahuAppToken = yield* createTextField(managerAkahuAppTokenFieldName)
         }
-        let akahuUserToken = current.find((field) => field.item.name === "Akahu User Token")
+        let akahuUserToken = credentialFields.akahuUserToken
         if (!akahuUserToken) {
-          akahuUserToken = yield* createTextField("Akahu User Token")
+          akahuUserToken = yield* createTextField(managerAkahuUserTokenFieldName)
         }
         return {
           akahuAppToken,
@@ -122,30 +127,16 @@ export class ManagerFlows extends Context.Service<
       const getAkahuSetupState = Effect.gen(function* () {
         const fields = yield* ensureCustomFields
         const business = yield* client["GET/api4/business-details"]()
-        const input = business.customFields2?.strings ?? {}
-        const akahuAppTokenValue = getCredentialValue(input[fields.akahuAppToken.key])
-        const akahuUserTokenValue = getCredentialValue(input[fields.akahuUserToken.key])
-        const missingFieldNames: Array<AkahuCredentialFieldName> = []
-
-        if (akahuAppTokenValue === undefined) {
-          missingFieldNames.push("Akahu App Token")
-        }
-        if (akahuUserTokenValue === undefined) {
-          missingFieldNames.push("Akahu User Token")
-        }
-
-        if (akahuAppTokenValue === undefined || akahuUserTokenValue === undefined) {
-          return new ManagerAkahuSetupMissingCredentials({ missingFieldNames })
-        }
-
-        const tokensOption = Schema.decodeOption(AkahuTokens)({
-          akahuAppToken: akahuAppTokenValue,
-          akahuUserToken: akahuUserTokenValue,
+        const tokensResult = decodeManagerAkahuBusinessDetailTokens({
+          fields,
+          strings: business.customFields2?.strings ?? {},
         })
-        if (Option.isNone(tokensOption)) {
-          return new ManagerAkahuSetupMissingCredentials({ missingFieldNames })
+        if (tokensResult._tag === "missing") {
+          return new ManagerAkahuSetupMissingCredentials({
+            missingFieldNames: tokensResult.missingFieldNames,
+          })
         }
-        const tokens = tokensOption.value
+        const tokens = tokensResult.tokens
 
         const accountsResult = yield* api("ListAccounts", tokens).pipe(
           Effect.map((accounts) => ({ _tag: "accounts" as const, accounts })),
@@ -239,12 +230,6 @@ export const collectManagerAkahuAccountSelections = (options: {
   }
 
   return { linkedAccounts, staleSelections } as const
-}
-
-const getCredentialValue = (value: unknown): string | undefined => {
-  if (typeof value !== "string") return undefined
-  const trimmed = value.trim()
-  return trimmed === "" ? undefined : trimmed
 }
 
 export const mapAkahuAccountsReadFailure = (error: AkahuRpcError): ManagerAkahuSetupState => {
