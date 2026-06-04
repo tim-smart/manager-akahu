@@ -17,14 +17,14 @@ The extension already discovers Akahu credentials from Manager Business Details 
 - Create Manager receipts for positive Akahu amounts and Manager payments for negative Akahu amounts.
 - De-duplicate settled transactions by Akahu transaction ID stored in Manager's fdxTransactionId field.
 - De-duplicate pending transactions by a generated fingerprint stored in Manager's fdxTransactionId field.
-- Keep the Akahu transaction fetch window at the current last 30 days.
+- Fetch settled Akahu transaction history for each selected account until five overlapping transactions are found, or Akahu has no more settled transactions to return.
 
 ## Non-goals and first-pass limits
 
 - Do not add automatic/background sync scheduling.
 - Do not add a user-configurable date range yet.
 - Do not implement Akahu credential editing or OAuth in this extension. Credentials continue to come from Manager Business Details custom fields.
-- Do not trigger Akahu refresh as part of this first implementation. Sync imports the recent transactions already available from Akahu through the existing ApiClient/RPC reads. The UI must avoid implying that it forced a fresh bank refresh.
+- Do not trigger Akahu refresh as part of this first implementation. Sync imports transactions already available from Akahu through the ApiClient/RPC reads. The UI must avoid implying that it forced a fresh bank refresh.
 - Do not add categorisation rules. Manager supports uncategorized/suspense receipts and payments, so default synced entries may rely on that.
 - Do not delete or modify user-created/non-Akahu Manager receipts/payments.
 - Do not automatically delete unmatched stale pending entries in the first implementation.
@@ -45,7 +45,7 @@ The extension already discovers Akahu credentials from Manager Business Details 
 - packages/domain/src/Akahu.ts defines Akahu Account, Transaction, and PendingTransaction schemas.
 - packages/domain/src/Akahu.ts defines HTTP API endpoints for account listing, settled account transactions, pending account transactions, and refresh.
 - packages/domain/src/rpc.ts exposes ListAccounts, AccountTransactions, and AccountPendingTransactions RPCs.
-- apps/server/src/Akahu.ts currently fetches transactions from the last 30 days.
+- apps/server/src/Akahu.ts currently fetches transactions from the last 30 days; later sync tasks must replace or extend this boundary so settled sync can continue until the five-overlap stop condition is reached.
 - apps/website/src/ApiClient.ts exposes the RPCs to the frontend through websocket AtomRpc.
 
 ### Existing Manager integration pieces
@@ -93,7 +93,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 ### Task 2 Akahu pagination findings
 
 - `apps/server/src/Akahu.ts` now uses one shared cursor-pagination helper for Akahu account, settled transaction, and pending transaction reads. `ListAccounts` collects all account pages before returning, while transaction RPCs continue to stream items across every page.
-- The transaction request shape was intentionally kept unchanged apart from forwarding `cursor`, preserving the existing 30-day Akahu transaction fetch behaviour/window rather than introducing a new date range parameter.
+- The transaction request shape was intentionally kept unchanged apart from forwarding `cursor`, preserving the then-existing 30-day Akahu transaction fetch behaviour/window. This is superseded for settled sync by the five-overlap stop condition, which may require ApiClient/RPC support for fetching older settled transactions.
 - Focused server tests cover multi-page mocked Akahu account, settled transaction, and pending transaction responses, including the cursor order requested from each mock page.
 - Manager batch pagination helpers were not added in this Akahu-only server/RPC change and remain pending for the later Manager sync implementation tasks that read receipts/payments.
 
@@ -153,7 +153,7 @@ The app must render one setup state after loading.
 - Starting a single-account sync or sync-all action opens a modal dialog.
 - Confirmation mode must show:
   - The accounts to be synced.
-  - That recent Akahu transactions from the last 30 days will be imported from already-available Akahu data.
+  - That Akahu settled transactions will be checked from newest to oldest until five already-imported overlaps are found, using already-available Akahu data.
   - Whether pending transactions will be included per account.
   - Buttons: Cancel and Start sync.
 - Running mode must show:
@@ -196,9 +196,26 @@ Credentials must remain redacted as long as practical and must not be logged.
 Akahu and Manager pagination must be handled before sync is considered complete.
 
 - Akahu account and transaction reads must follow cursor.next until no next cursor remains. Existing server/RPC code currently maps a single page; implementation must extend it to return all pages for ListAccounts, AccountTransactions, and AccountPendingTransactions where pagination is provided.
+- Settled transaction sync must not rely on a fixed last-30-days window. It must be able to fetch enough settled Akahu history to satisfy the five-overlap stop condition or prove that Akahu returned no more settled transactions.
 - Manager batch reads for existing receipts and payments must fetch all relevant items for the selected bank/cash account. Use Skip/PageSize paging or a verified Manager API mechanism that returns all filtered items.
 - De-duplication must be based on the complete existing receipt/payment set for the account, not just the first page.
 - Tests must cover duplicate entries beyond the first Manager page and Akahu transaction results beyond the first Akahu page if practical with the available test setup.
+
+### Settled sync history boundary
+
+For each selected linked account, settled Akahu transactions must be fetched and processed from newest to oldest until one of these stop conditions is reached:
+
+- Five overlapping settled transactions have been found for that Manager account.
+- Akahu indicates there are no more settled transactions available for that account.
+- A fatal read/write error stops the account sync and is reported in the modal summary.
+
+An overlapping settled transaction means an Akahu settled transaction whose ID already exists in Manager as `fdxTransactionId` on either a receipt or a payment for the same linked Manager bank/cash account.
+
+The five-overlap boundary is only a sync-history stop signal. Overlapping transactions are still counted as `duplicatesSkipped`, and non-overlapping transactions encountered before the fifth overlap must still be imported or skipped according to the normal transaction rules. Transactions older than the fifth overlap in newest-to-oldest order must not be imported during that sync run.
+
+Pending transaction sync is not bounded by the five-overlap rule. Pending transactions should continue to use the current pending endpoint result set for accounts that support pending transactions.
+
+The implementation may satisfy this by extending the existing Akahu transaction RPC to request older settled history, by adding a dedicated sync-history RPC, or by another verified Akahu pagination/date-window mechanism. Do not expose a user-configurable date range as part of this requirement.
 
 ### Manager API compatibility requirements
 
@@ -217,7 +234,7 @@ Before implementing Manager writes, verify and document these Manager API detail
 
 For each selected linked account:
 
-1. Fetch settled Akahu transactions through ApiClient AccountTransactions using the account's Akahu account ID and current credentials.
+1. Fetch settled Akahu transactions through ApiClient AccountTransactions using the account's Akahu account ID and current credentials, continuing from newest to oldest until five overlapping settled transactions are found or Akahu has no more settled transactions.
 2. If the linked Manager bank/cash account has canHavePendingTransactions true, fetch pending Akahu transactions through ApiClient AccountPendingTransactions.
 3. Positive Akahu amount creates a Manager receipt:
    - receivedIn = linked Manager bank/cash account key.
@@ -293,7 +310,7 @@ When updating Akahu-created pending entries, preserve user-editable fields where
 - Prefer sequential account processing for the first implementation.
 - Within each account:
   1. Fetch existing Manager receipts/payments with complete pagination.
-  2. Fetch settled Akahu transactions with complete pagination.
+  2. Fetch settled Akahu transactions with complete pagination/history until five overlapping settled transactions are found or Akahu has no more settled transactions.
   3. Fetch pending Akahu transactions only if supported by the Manager account.
   4. Process settled transactions before pending transactions.
   5. Create/update Manager receipts/payments.
@@ -344,6 +361,8 @@ Mocked service tests should cover:
 - Stale Manager Akahu account selection warning.
 - Single-account settled sync creating expected receipt/payment payloads.
 - Re-running settled sync skipping duplicates.
+- Settled sync stops after finding five overlapping transactions.
+- Settled sync continues past fewer than five overlaps and imports non-overlapping older transactions.
 - Existing duplicate beyond the first Manager page.
 - Pending endpoint not called when canHavePendingTransactions is false.
 - Pending create/update and repeat pending sync without duplicates.
@@ -382,7 +401,7 @@ Create or edit a Manager bank/cash account and choose the matching Akahu account
 
 Linked bank accounts
 
-Sync recent Akahu transactions into Manager receipts and payments. Transactions from the last 30 days are checked and duplicates are skipped.
+Sync Akahu transactions into Manager receipts and payments. Settled transactions are checked from newest to oldest until five already-imported overlaps are found, and duplicates are skipped.
 
 ## Implementation plan
 
@@ -424,7 +443,7 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary
 
 - Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly.
-- Assert the concrete Akahu request/query shape for all three paths: account pages request `cursor`, settled transaction pages request `cursor` while preserving the existing 30-day window, and pending transaction pages request both `amount_as_number=true` and `cursor` on every page.
+- Assert the concrete Akahu request/query shape for all three paths: account pages request `cursor`, settled transaction pages request `cursor` and any required older-history/date-window parameters for the five-overlap stop condition, and pending transaction pages request both `amount_as_number=true` and `cursor` on every page.
 - Verify RPC consumption returns all `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` items across multiple pages, not only that the exported helper can flatten mock strings.
 - After boundary coverage exists, make `paginatedAkahuItems` private to `apps/server/src/Akahu.ts` unless another production module has a real need for it. Avoid exporting implementation details solely to test them.
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, `pnpm --filter @app/domain build`, and `pnpm ready` pass.
@@ -486,7 +505,7 @@ None. Decisions made for this specification:
 - Manager uncategorized/suspense receipts/payments are the default target for uncategorized Akahu transactions.
 - Pending Akahu transactions should use Manager's creation and clearance date/status support.
 - fdxTransactionId stores settled Akahu transaction IDs and generated pending fingerprints.
-- The fetch window remains 30 days for now.
+- Settled transaction sync continues until five already-imported overlaps are found or Akahu has no more settled transactions; pending sync remains limited to the current pending endpoint result set.
 - Pending entries are matched by generated fingerprint rather than deleted/recreated.
 - Positive Akahu amounts map to receipts; negative Akahu amounts map to payments using absolute amount.
 - Akahu refresh is not triggered in the first implementation.
