@@ -47,23 +47,13 @@ const parseAkahuTransactionDate = (
   return calendarDate === undefined ? undefined : { raw, calendarDate }
 }
 
-type AssertTrue<T extends true> = T
-type AkahuTransactionDateValueShape = {
-  readonly raw: string
-  readonly calendarDate: CalendarDate
-}
-
 class AkahuTransactionDateValue extends Schema.Class<
   AkahuTransactionDateValue,
   { readonly AkahuTransactionDateNominal: unique symbol }
 >("akahu/TransactionDate")({
   raw: Schema.String,
   calendarDate: CalendarDate,
-}) {
-  declare static readonly nominalGuard: AssertTrue<
-    AkahuTransactionDateValueShape extends AkahuTransactionDateValue ? false : true
-  >
-}
+}) {}
 
 export const AkahuTransactionDate = Schema.String.pipe(
   Schema.decodeTo(AkahuTransactionDateValue, {
