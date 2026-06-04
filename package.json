@@ -5,14 +5,16 @@
   "type": "module",
   "scripts": {
     "build": "tsgo -b tsconfig.json",
-    "ready": "vp fmt && vp lint && vp run -r test && pnpm build && pnpm --filter website bundle",
+    "ready": "vp fmt && vp lint && pnpm test && pnpm build && pnpm --filter website bundle",
     "dev": "vp run --filter website --filter server --parallel --log labeled dev",
     "dev:server": "vp run server#dev",
-    "prepare": "vp config && effect-tsgo patch"
+    "prepare": "vp config && effect-tsgo patch",
+    "test": "vitest"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
     "@effect/tsgo": "0.13.1",
+    "@effect/vitest": "4.0.0-beta.76",
     "@typescript/native-preview": "latest",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

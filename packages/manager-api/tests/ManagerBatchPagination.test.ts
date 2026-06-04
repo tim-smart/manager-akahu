@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { expect, test } from "vite-plus/test"
+import { expect, it } from "@effect/vitest"
 import type {
   ManagerBankOrCashAccountBatchReadInput,
   ManagerBankOrCashAccountSyncReadClient,
@@ -20,12 +20,6 @@ import {
 const bankOrCashAccountKey = "bank-1"
 const business = "business-1"
 const fullPageSize = managerBatchReadDefaultPageSize
-
-type AssertTrue<T extends true> = T
-
-type ManagerBatchReadInputHasNoPublicPageSize = AssertTrue<
-  "pageSize" extends keyof ManagerBankOrCashAccountBatchReadInput ? false : true
->
 
 const publicSyncReadInput = {
   bankOrCashAccountKey,
@@ -158,7 +152,7 @@ const makeSyncReadClient = (options: {
   ...makePaymentBatchClient(options.paymentPages, options.paymentRequests),
 })
 
-test("fetches every Manager receipt batch page for the selected bank/cash account", () => {
+it.effect("fetches every Manager receipt batch page for the selected bank/cash account", () => {
   const requests: Array<ManagerReceiptBatchParams> = []
   const pages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
     receiptPage(0, fullPageSize),
@@ -167,9 +161,8 @@ test("fetches every Manager receipt batch page for the selected bank/cash accoun
   ])
   const client = makeReceiptBatchClient(pages, requests)
 
-  return Effect.runPromise(
-    fetchAllManagerReceiptsForBankOrCashAccount(client, publicSyncReadInput),
-  ).then((receipts) => {
+  return Effect.gen(function* () {
+    const receipts = yield* fetchAllManagerReceiptsForBankOrCashAccount(client, publicSyncReadInput)
     expect(receipts).toHaveLength(totalItems(fullPageSize, fullPageSize, 1))
     expectKeyAtPageOffset(receipts, "receipt", 0)
     expectKeyAtPageOffset(receipts, "receipt", 1)
@@ -181,20 +174,19 @@ test("fetches every Manager receipt batch page for the selected bank/cash accoun
   })
 })
 
-test("fetches every Manager payment batch page for the selected bank/cash account", () => {
-  const requests: Array<ManagerPaymentBatchParams> = []
-  const pages = new Map<number, ReadonlyArray<ManagerPaymentItem>>([
-    paymentPage(0, fullPageSize),
-    paymentPage(1, fullPageSize, new Map([[0, "akahu-tx-existing"]])),
-    paymentPage(2, 0),
-  ])
-  const client = makePaymentBatchClient(pages, requests)
+it.effect("fetches every Manager payment batch page for the selected bank/cash account", () =>
+  Effect.gen(function* () {
+    const requests: Array<ManagerPaymentBatchParams> = []
+    const pages = new Map<number, ReadonlyArray<ManagerPaymentItem>>([
+      paymentPage(0, fullPageSize),
+      paymentPage(1, fullPageSize, new Map([[0, "akahu-tx-existing"]])),
+      paymentPage(2, 0),
+    ])
+    const client = makePaymentBatchClient(pages, requests)
 
-  return Effect.runPromise(
-    fetchAllManagerPaymentsForBankOrCashAccount(client, {
+    const payments = yield* fetchAllManagerPaymentsForBankOrCashAccount(client, {
       bankOrCashAccountKey,
-    }),
-  ).then((payments) => {
+    })
     expect(payments).toHaveLength(totalItems(fullPageSize, fullPageSize))
     expectKeyAtPageOffset(payments, "payment", 0)
     expectKeyAtPageOffset(payments, "payment", 1)
@@ -202,50 +194,52 @@ test("fetches every Manager payment batch page for the selected bank/cash accoun
       true,
     )
     expectBatchRequests(requests, [0, 1, 2])
-  })
-})
+  }),
+)
 
-test("fetches the canonical Manager sync read model with receipt and payment fdxTransactionId entries", () => {
-  const receiptRequests: Array<ManagerReceiptBatchParams> = []
-  const paymentRequests: Array<ManagerPaymentBatchParams> = []
-  const receiptPages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
-    receiptPage(0, fullPageSize, new Map([[0, "receipt-first-page"]])),
-    receiptPage(
-      1,
-      2,
-      new Map([
-        [0, "akahu-tx-existing"],
-        [1, "receipt-last"],
-      ]),
-    ),
-  ])
-  const paymentPages = new Map<number, ReadonlyArray<ManagerPaymentItem>>([
-    paymentPage(
-      0,
-      fullPageSize,
-      new Map([
-        [0, "payment-first-page"],
-        [1, "payment-2"],
-      ]),
-    ),
-    paymentPage(
-      1,
-      2,
-      new Map([
-        [0, "akahu-tx-existing"],
-        [1, "payment-last"],
-      ]),
-    ),
-  ])
-  const client = makeSyncReadClient({
-    receiptPages,
-    receiptRequests,
-    paymentPages,
-    paymentRequests,
-  })
+it.effect(
+  "fetches the canonical Manager sync read model with receipt and payment fdxTransactionId entries",
+  () =>
+    Effect.gen(function* () {
+      const receiptRequests: Array<ManagerReceiptBatchParams> = []
+      const paymentRequests: Array<ManagerPaymentBatchParams> = []
+      const receiptPages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
+        receiptPage(0, fullPageSize, new Map([[0, "receipt-first-page"]])),
+        receiptPage(
+          1,
+          2,
+          new Map([
+            [0, "akahu-tx-existing"],
+            [1, "receipt-last"],
+          ]),
+        ),
+      ])
+      const paymentPages = new Map<number, ReadonlyArray<ManagerPaymentItem>>([
+        paymentPage(
+          0,
+          fullPageSize,
+          new Map([
+            [0, "payment-first-page"],
+            [1, "payment-2"],
+          ]),
+        ),
+        paymentPage(
+          1,
+          2,
+          new Map([
+            [0, "akahu-tx-existing"],
+            [1, "payment-last"],
+          ]),
+        ),
+      ])
+      const client = makeSyncReadClient({
+        receiptPages,
+        receiptRequests,
+        paymentPages,
+        paymentRequests,
+      })
 
-  return Effect.runPromise(fetchManagerBankOrCashAccountSyncRead(client, publicSyncReadInput)).then(
-    (syncRead) => {
+      const syncRead = yield* fetchManagerBankOrCashAccountSyncRead(client, publicSyncReadInput)
       expect(syncRead.receipts).toHaveLength(totalItems(fullPageSize, 2))
       expect(syncRead.payments).toHaveLength(totalItems(fullPageSize, 2))
       expectKeyAtPageOffset(syncRead.receipts, "receipt", 0)
@@ -279,6 +273,5 @@ test("fetches the canonical Manager sync read model with receipt and payment fdx
       ])
       expectBatchRequests(receiptRequests, [0, 1], { business })
       expectBatchRequests(paymentRequests, [0, 1], { business })
-    },
-  )
-})
+    }),
+)

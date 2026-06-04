@@ -3,7 +3,7 @@ import { ApiRpcs } from "@app/domain/rpc"
 import { Effect, Layer, Redacted, Schema, Stream } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
-import { expect, test } from "vite-plus/test"
+import { expect, it } from "@effect/vitest"
 import { Akahu } from "../src/Akahu.ts"
 import { ApiHandlersBase } from "../src/rpc.ts"
 
@@ -126,9 +126,9 @@ const runWithMockAkahu = <A, E, R>(
   )
 }
 
-test("ListAccounts returns all Akahu accounts across cursor pages", () =>
-  Effect.runPromise(
-    runWithMockAkahu(
+it.effect("ListAccounts returns all Akahu accounts across cursor pages", () =>
+  Effect.gen(function* () {
+    const result = yield* runWithMockAkahu(
       [
         {
           request: expectedAkahuRequest({ pathname: "/v1/accounts" }),
@@ -143,14 +143,14 @@ test("ListAccounts returns all Akahu accounts across cursor pages", () =>
         },
       ],
       (client) => client.ListAccounts(credentials),
-    ),
-  ).then((result) => {
+    )
     expect(result.map((item) => item._id)).toEqual(["acc_1", "acc_2"])
-  }))
+  }),
+)
 
-test("AccountTransactions streams all settled transactions across cursor pages", () =>
-  Effect.runPromise(
-    runWithMockAkahu(
+it.effect("AccountTransactions streams all settled transactions across cursor pages", () =>
+  Effect.gen(function* () {
+    const result = yield* runWithMockAkahu(
       [
         {
           request: expectedAkahuRequest({ pathname: "/v1/accounts/acc_1/transactions" }),
@@ -176,36 +176,38 @@ test("AccountTransactions streams all settled transactions across cursor pages",
           Stream.runCollect,
           Effect.map((items) => Array.from(items)),
         ),
-    ),
-  ).then((result) => {
+    )
     expect(result.map((item) => item._id)).toEqual(["txn_1", "txn_2", "txn_3"])
-  }))
+  }),
+)
 
-test("AccountPendingTransactions streams all pending transactions with amount_as_number across cursor pages", () =>
-  Effect.runPromise(
-    runWithMockAkahu(
-      [
-        {
-          request: expectedAkahuRequest({
-            pathname: "/v1/accounts/acc_1/transactions/pending",
-            query: { amount_as_number: "true" },
-          }),
-          response: page([pendingTransaction("pending-1")], "pending-page-2"),
-        },
-        {
-          request: expectedAkahuRequest({
-            pathname: "/v1/accounts/acc_1/transactions/pending",
-            query: { amount_as_number: "true", cursor: "pending-page-2" },
-          }),
-          response: page([pendingTransaction("pending-2")], null),
-        },
-      ],
-      (client) =>
-        client.AccountPendingTransactions({ ...credentials, accountId }).pipe(
-          Stream.runCollect,
-          Effect.map((items) => Array.from(items)),
-        ),
-    ),
-  ).then((result) => {
-    expect(result.map((item) => item.description)).toEqual(["pending-1", "pending-2"])
-  }))
+it.effect(
+  "AccountPendingTransactions streams all pending transactions with amount_as_number across cursor pages",
+  () =>
+    Effect.gen(function* () {
+      const result = yield* runWithMockAkahu(
+        [
+          {
+            request: expectedAkahuRequest({
+              pathname: "/v1/accounts/acc_1/transactions/pending",
+              query: { amount_as_number: "true" },
+            }),
+            response: page([pendingTransaction("pending-1")], "pending-page-2"),
+          },
+          {
+            request: expectedAkahuRequest({
+              pathname: "/v1/accounts/acc_1/transactions/pending",
+              query: { amount_as_number: "true", cursor: "pending-page-2" },
+            }),
+            response: page([pendingTransaction("pending-2")], null),
+          },
+        ],
+        (client) =>
+          client.AccountPendingTransactions({ ...credentials, accountId }).pipe(
+            Stream.runCollect,
+            Effect.map((items) => Array.from(items)),
+          ),
+      )
+      expect(result.map((item) => item.description)).toEqual(["pending-1", "pending-2"])
+    }),
+)

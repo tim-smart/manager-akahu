@@ -9,7 +9,6 @@ catalog:
   "@types/node": ^24
   typescript: ^5.9.3
   vite: npm:@voidzero-dev/vite-plus-core@latest
-  vitest: npm:@voidzero-dev/vite-plus-test@^0.1.24
   vite-plus: latest
   effect: 4.0.0-beta.78
   react: ^19.2.6
@@ -33,16 +32,15 @@ catalog:
   "@effect/language-service": ^0.86.2
   radix-ui: ^1.4.3
   "@effect/platform-browser": 4.0.0-beta.78
+  "@effect/vitest": ^0.29.0
+  vitest: ^4.1.8
 overrides:
   vite: "catalog:"
-  vitest: "catalog:"
 peerDependencyRules:
   allowAny:
     - vite
-    - vitest
   allowedVersions:
     vite: "*"
-    vitest: "*"
 allowBuilds:
   msgpackr-extract: true
 patchedDependencies:
