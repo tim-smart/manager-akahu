@@ -209,7 +209,7 @@ it.effect("AccountTransactions streams all settled transactions across cursor pa
         ),
     )
     expect(result.map((item) => item._id)).toEqual(["txn_1", "txn_2", "txn_3"])
-    expect(result[0]?.date).toEqual({
+    expect(result[0]?.date).toMatchObject({
       raw: "2026-06-05T00:30:00.000+13:00",
       calendarDate: "2026-06-05",
     })
@@ -292,7 +292,7 @@ it.effect(
           ),
       )
       expect(result.map((item) => item.description)).toEqual(["pending-1", "pending-2"])
-      expect(result[0]?.date).toEqual({
+      expect(result[0]?.date).toMatchObject({
         raw: "2026-06-04T23:30:00.000-10:00",
         calendarDate: "2026-06-04",
       })

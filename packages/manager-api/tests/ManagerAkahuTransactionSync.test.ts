@@ -1,4 +1,7 @@
-import { AkahuTransactionDate } from "@app/domain/Akahu"
+import {
+  AkahuTransactionDate,
+  type AkahuTransactionDate as AkahuTransactionDateValue,
+} from "@app/domain/Akahu"
 import { BigDecimal, Schema } from "effect"
 import { expect, test } from "@effect/vitest"
 import type { ManagerPaymentItem, ManagerReceiptItem } from "../src/index.ts"
@@ -21,6 +24,18 @@ import {
 const bankOrCashAccountKey = "bank-1"
 
 const akahuDate = (date: string) => Schema.decodeSync(AkahuTransactionDate)(date)
+
+const unsafeAkahuDateForTest = (date: {
+  readonly raw: string
+  readonly calendarDate: string
+}): AkahuTransactionDateValue => date as unknown as AkahuTransactionDateValue
+
+const inconsistentStructuralAkahuDate: AkahuTransactionDateValue = {
+  raw: "2026-06-05T00:30:00.000+13:00",
+  // @ts-expect-error AkahuTransactionDate values must come from the domain decoder.
+  calendarDate: "not-a-date",
+}
+void inconsistentStructuralAkahuDate
 
 const receiptItem = (key: string, item: ManagerReceiptItem["item"]): ManagerReceiptItem => ({
   key,
@@ -90,12 +105,24 @@ const pendingPayment = (
 
 test("decoded Akahu transaction dates preserve raw strings and expose Manager calendar dates", () => {
   const offsetDate = akahuDate("2026-06-05T00:30:00.000+13:00")
-  expect(offsetDate).toEqual({
+  expect(offsetDate).toMatchObject({
     raw: "2026-06-05T00:30:00.000+13:00",
     calendarDate: "2026-06-05",
   })
   expect(akahuDate("2026-06-04T23:30:00.000-10:00").calendarDate).toBe("2026-06-04")
-  expect(akahuDate("2026-06-05")).toEqual({ raw: "2026-06-05", calendarDate: "2026-06-05" })
+  expect(akahuDate("2026-06-05")).toMatchObject({
+    raw: "2026-06-05",
+    calendarDate: "2026-06-05",
+  })
+})
+
+test("manager sync helpers only accept inconsistent structural Akahu dates through an explicit test escape hatch", () => {
+  const inconsistent = unsafeAkahuDateForTest({
+    raw: "2026-06-05T00:30:00.000+13:00",
+    calendarDate: "not-a-date",
+  })
+
+  expect(inconsistent.calendarDate).toBe("not-a-date")
 })
 
 test("rejects Akahu transaction dates with invalid calendar components", () => {

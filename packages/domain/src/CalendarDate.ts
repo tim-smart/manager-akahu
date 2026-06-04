@@ -1,7 +1,18 @@
+import { type Brand, Schema } from "effect"
+
 const exactCalendarDate = /^(\d{4})-(\d{2})-(\d{2})$/
 
+export type CalendarDate = string & Brand.Brand<"CalendarDate">
+
+export const CalendarDate = Schema.String.pipe(
+  Schema.refine((date): date is CalendarDate => parseCalendarDate(date) !== undefined, {
+    identifier: "CalendarDate",
+    message: "Calendar date must be an exact valid yyyy-mm-dd date",
+  }),
+)
+
 export interface CalendarDateParts {
-  readonly date: string
+  readonly date: CalendarDate
   readonly year: number
   readonly month: number
   readonly day: number
@@ -28,5 +39,5 @@ export const parseCalendarDate = (date: string): CalendarDateParts | undefined =
     return undefined
   }
 
-  return { date, year, month, day }
+  return { date: date as CalendarDate, year, month, day }
 }

@@ -1,6 +1,6 @@
-import { type Brand, DateTime, Schema, SchemaGetter } from "effect"
+import { Effect, type Brand, DateTime, Option, Schema, SchemaGetter, SchemaIssue } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
-import { parseCalendarDate } from "./CalendarDate.ts"
+import { type CalendarDate, parseCalendarDate } from "./CalendarDate.ts"
 import { BigDecimalFromNumber } from "./shared.ts"
 
 export class Merchant extends Schema.Class<Merchant>("akahu/Merchant")({
@@ -25,7 +25,12 @@ export type UserId = typeof UserId.Type
 
 const leadingCalendarDate = /^(\d{4}-\d{2}-\d{2})(?:$|[T\s])/
 
-const getLeadingAkahuCalendarDate = (value: string): string | undefined => {
+const invalidAkahuTransactionDateIssue = (raw: string) =>
+  new SchemaIssue.InvalidValue(Option.some(raw), {
+    message: "Akahu transaction date must start with a valid yyyy-mm-dd calendar date",
+  })
+
+const getLeadingAkahuCalendarDate = (value: string): CalendarDate | undefined => {
   const match = leadingCalendarDate.exec(value)
   const calendarDate = match?.[1]
   if (calendarDate === undefined) {
@@ -37,23 +42,29 @@ const getLeadingAkahuCalendarDate = (value: string): string | undefined => {
 
 const parseAkahuTransactionDate = (
   raw: string,
-): { readonly raw: string; readonly calendarDate: string } | undefined => {
+): { readonly raw: string; readonly calendarDate: CalendarDate } | undefined => {
   const calendarDate = getLeadingAkahuCalendarDate(raw)
   return calendarDate === undefined ? undefined : { raw, calendarDate }
 }
 
-const AkahuTransactionDateValue = Schema.Struct({
+class AkahuTransactionDateValue extends Schema.Class<AkahuTransactionDateValue>(
+  "akahu/TransactionDate",
+)({
   raw: Schema.String,
   calendarDate: Schema.String,
-})
+}) {
+  declare readonly calendarDate: CalendarDate
+  declare private readonly AkahuTransactionDateNominal: void
+}
 
 export const AkahuTransactionDate = Schema.String.pipe(
-  Schema.refine((value): value is string => parseAkahuTransactionDate(value) !== undefined, {
-    identifier: "akahu/TransactionDate",
-    message: "Akahu transaction date must start with a valid yyyy-mm-dd calendar date",
-  }),
   Schema.decodeTo(AkahuTransactionDateValue, {
-    decode: SchemaGetter.transform((raw) => parseAkahuTransactionDate(raw)!),
+    decode: SchemaGetter.transformOrFail((raw) => {
+      const date = parseAkahuTransactionDate(raw)
+      return date === undefined
+        ? Effect.fail(invalidAkahuTransactionDateIssue(raw))
+        : Effect.succeed(new AkahuTransactionDateValue(date))
+    }),
     encode: SchemaGetter.transform((date) => date.raw),
   }),
 )
