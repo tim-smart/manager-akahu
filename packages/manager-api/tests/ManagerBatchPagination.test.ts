@@ -21,10 +21,15 @@ const bankOrCashAccountKey = "bank-1"
 const business = "business-1"
 const fullPageSize = managerBatchReadDefaultPageSize
 
+type ManagerBankOrCashAccountBatchReadInputWithoutPageSize =
+  Extract<keyof ManagerBankOrCashAccountBatchReadInput, "pageSize"> extends never
+    ? ManagerBankOrCashAccountBatchReadInput
+    : never
+
 const publicSyncReadInput = {
   bankOrCashAccountKey,
   business,
-} satisfies ManagerBankOrCashAccountBatchReadInput
+} satisfies ManagerBankOrCashAccountBatchReadInputWithoutPageSize
 
 const receiptItem = (key: string, fdxTransactionId: string): ManagerReceiptItem => ({
   key,

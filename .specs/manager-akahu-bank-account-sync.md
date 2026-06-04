@@ -106,6 +106,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 2 Akahu boundary follow-up replaced helper-only tests with `RpcTest` coverage for `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` backed by the real Akahu service request wiring and an injected mock HTTP client. The tests assert all items are returned across multiple cursor pages and capture the concrete Akahu request path/query shape, including `amount_as_number=true` on every pending transaction page.
 - `paginatedAkahuItems` is now private to `apps/server/src/Akahu.ts`; tests no longer import the helper. `Akahu.layerWithHttpClient` provides the same service implementation with injectable transport for tests, while `Akahu.layer` remains the live Node/Undici layer.
 - No settled older-history/date-window RPC boundary was added in this task. The settled transaction boundary remains the existing account transaction request with cursor pagination only, so future five-overlap sync work still needs to add or verify the older-history fetch mechanism.
+- Task 2 Manager sync-read input boundary follow-up added a local no-emit type guard in `ManagerBatchPagination.test.ts` so `ManagerBankOrCashAccountBatchReadInput` fails test/build typechecking if a public `pageSize` key is reintroduced. The guard remains confined to pagination tests and does not add runtime page-size configuration.
 
 ## Requirements
 
@@ -473,11 +474,11 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve coverage that the public read input has no page-size override and that all Manager requests use `managerBatchReadDefaultPageSize`; the goal is to delete test noise, not reintroduce a test-only production knob or weaken pagination assertions. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
-### Task 2 follow-up review follow-up audit: Enforce Manager sync-read input boundary
+### Task 2 follow-up review follow-up audit: Enforce Manager sync-read input boundary (completed)
 
-- Tighten the fixture-compression coverage for `ManagerBankOrCashAccountBatchReadInput`. The shared `publicSyncReadInput satisfies ManagerBankOrCashAccountBatchReadInput` fixture proves the minimal input shape is accepted, but it would still pass if an optional public `pageSize` override is accidentally reintroduced later.
-- Add a small local type-level guard in `packages/manager-api/tests/ManagerBatchPagination.test.ts`, such as an exact-key assertion or a focused `@ts-expect-error` fixture containing `pageSize`, so the tests/build fail if pagination overrides return to the public sync-read input.
-- Keep the guard boring and local to the pagination tests. Do not reintroduce runtime page-size configuration or a test-only production knob.
+- Tighten the fixture-compression coverage for `ManagerBankOrCashAccountBatchReadInput`. The shared `publicSyncReadInput satisfies ManagerBankOrCashAccountBatchReadInput` fixture proves the minimal input shape is accepted, but it would still pass if an optional public `pageSize` override is accidentally reintroduced later. (completed)
+- Add a small local type-level guard in `packages/manager-api/tests/ManagerBatchPagination.test.ts`, such as an exact-key assertion or a focused `@ts-expect-error` fixture containing `pageSize`, so the tests/build fail if pagination overrides return to the public sync-read input. (completed)
+- Keep the guard boring and local to the pagination tests. Do not reintroduce runtime page-size configuration or a test-only production knob. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary (completed)
