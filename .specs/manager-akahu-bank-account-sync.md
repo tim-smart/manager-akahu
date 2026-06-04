@@ -768,6 +768,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add focused mocked tests for duplicate pending rows in the same run when the first row updates an existing exact fingerprint, receipt and payment pending update dispatch, and the chosen pending update preservation/replacement policy. Keep the existing unsupported-pending-account, pending create/update, settled-before-pending, and repeat-sync idempotency coverage. (not completed beyond preserving existing focused coverage with the renamed transaction-sync API)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass.
 
+### Task 6 follow-up review follow-up: Accept first-class transaction phase refactor (completed)
+
+- Deep code-quality review found no new actionable structural follow-up for the neutral transaction-sync phase refactor beyond the already-tracked unresolved Task 6 follow-up items around pending update policy, pending candidate normalization, and focused pending-update coverage. Keep the public hidden service/orchestrator on `ManagerSyncFlows.syncTransactions` / `syncManagerAkahuTransactions`, keep settled overlap state local to the settled phase, and keep shared counts, warnings, errors, and processed `fdxTransactionId`s in neutral account state. (completed)
+- Preserve the current phase shape for Task 7 UI wiring: one account orchestration path fetches Manager sync read/importability once, then runs the settled phase before the pending phase when supported and when the settled stream did not fail. Do not reintroduce settled-only service names, compatibility aliases for the old hidden API, or duplicated settled/pending receipt/payment POST plumbing. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passing.
+
 ### Task 7: Sync atoms, linked-account sync UI, and confirmation/progress modal
 
 - Add sync atom/mutation state that invokes the completed sync service and prevents concurrent sync in the current tab.
