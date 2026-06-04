@@ -152,16 +152,15 @@ const makeSyncReadClient = (options: {
   ...makePaymentBatchClient(options.paymentPages, options.paymentRequests),
 })
 
-it.effect("fetches every Manager receipt batch page for the selected bank/cash account", () => {
-  const requests: Array<ManagerReceiptBatchParams> = []
-  const pages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
-    receiptPage(0, fullPageSize),
-    receiptPage(1, fullPageSize, new Map([[0, "akahu-tx-existing"]])),
-    receiptPage(2, 1),
-  ])
-  const client = makeReceiptBatchClient(pages, requests)
-
-  return Effect.gen(function* () {
+it.effect("fetches every Manager receipt batch page for the selected bank/cash account", () =>
+  Effect.gen(function* () {
+    const requests: Array<ManagerReceiptBatchParams> = []
+    const pages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
+      receiptPage(0, fullPageSize),
+      receiptPage(1, fullPageSize, new Map([[0, "akahu-tx-existing"]])),
+      receiptPage(2, 1),
+    ])
+    const client = makeReceiptBatchClient(pages, requests)
     const receipts = yield* fetchAllManagerReceiptsForBankOrCashAccount(client, publicSyncReadInput)
     expect(receipts).toHaveLength(totalItems(fullPageSize, fullPageSize, 1))
     expectKeyAtPageOffset(receipts, "receipt", 0)
@@ -171,8 +170,8 @@ it.effect("fetches every Manager receipt batch page for the selected bank/cash a
       true,
     )
     expectBatchRequests(requests, [0, 1, 2], { business })
-  })
-})
+  }),
+)
 
 it.effect("fetches every Manager payment batch page for the selected bank/cash account", () =>
   Effect.gen(function* () {
