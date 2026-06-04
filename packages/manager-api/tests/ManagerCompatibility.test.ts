@@ -69,7 +69,6 @@ test("builds a receipt import decision for positive signed amounts", () => {
         description: "Coffee shop",
         lines: [{ amount: "12.34", lineDescription: "Coffee shop" }],
         fdxTransactionId: "akahu-tx-1",
-        automaticReference: true,
       },
     },
   })
@@ -99,7 +98,6 @@ test("builds a payment import decision for negative signed amounts using the abs
         description: "Shop",
         lines: [{ amount: "9.99", lineDescription: "Shop" }],
         fdxTransactionId: "akahu-pending:v1:bank-1:2026-06-04:9.99:shop",
-        automaticReference: true,
       },
     },
   })

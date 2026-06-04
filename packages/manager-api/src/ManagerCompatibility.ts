@@ -138,7 +138,6 @@ export const buildManagerSuspenseImportDecision = (
       payload: {
         value: {
           ...baseValue,
-          automaticReference: true,
           paidFrom: input.bankOrCashAccountKey,
         },
       } satisfies ManagerSuspensePaymentPayload,
@@ -150,7 +149,6 @@ export const buildManagerSuspenseImportDecision = (
     payload: {
       value: {
         ...baseValue,
-        automaticReference: true,
         receivedIn: input.bankOrCashAccountKey,
       },
     } satisfies ManagerSuspenseReceiptPayload,
