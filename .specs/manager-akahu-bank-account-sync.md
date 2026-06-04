@@ -481,6 +481,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Keep the guard boring and local to the pagination tests. Do not reintroduce runtime page-size configuration or a test-only production knob. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
+### Task 2 follow-up review follow-up audit follow-up: Make Manager page-size type guard direct
+
+- Replace `ManagerBankOrCashAccountBatchReadInputWithoutPageSize` with a direct no-emit assertion that states the actual boundary being protected, such as a local `type ManagerBatchReadInputHasNoPublicPageSize = "pageSize" extends keyof ManagerBankOrCashAccountBatchReadInput ? never : true` plus a `const` assignment, or an equally explicit exact-key assertion.
+- Keep `publicSyncReadInput` typed with the real `ManagerBankOrCashAccountBatchReadInput` contract. The current wrapper type behaves correctly, but it creates a second pseudo input type whose name reads like a transformed production shape instead of a focused regression guard; future readers should not have to inspect a conditional alias to understand that only the public `pageSize` key is being rejected.
+- Keep the guard local to `packages/manager-api/tests/ManagerBatchPagination.test.ts`, with no runtime page-size configuration and no test-only production knob.
+- Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
+
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary (completed)
 
 - Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly. (completed)
