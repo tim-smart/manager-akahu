@@ -12,8 +12,10 @@ import {
   type RunManagerAkahuTransactionSync,
 } from "../src/Manager/useManagerAkahuSyncController.ts"
 import {
+  closeManagerAkahuSyncDialog,
   initialManagerAkahuSyncDialogState,
   openManagerAkahuSyncDialog,
+  sanitizeManagerAkahuSyncDialogText,
   type ManagerAkahuSyncDialogState,
 } from "../src/Manager/SyncUi.ts"
 
@@ -249,4 +251,52 @@ it("does not dismiss running sync state through controller close paths", () => {
   closeManagerAkahuSyncController(controllerState)
 
   expect(controllerState.stateRef.current._tag).toBe("running")
+})
+
+it("keeps the running dialog open when the dialog primitive requests dismissal", () => {
+  const account = linkedAccount()
+  const runningState: ManagerAkahuSyncDialogState = { _tag: "running", accounts: [account] }
+
+  expect(closeManagerAkahuSyncDialog(runningState)).toBe(runningState)
+})
+
+it("redacts credential-looking values before storing completed summary errors in UI state", async () => {
+  const account = linkedAccount()
+  const controllerState = immediateControllerState(
+    openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account]),
+  )
+  const inFlightRef = { current: false }
+  const runTransactionSync: RunManagerAkahuTransactionSync = () =>
+    Promise.resolve({
+      accounts: [
+        {
+          account,
+          counts: emptyManagerAkahuSyncSummaryCounts(),
+          warnings: ["Akahu App Token: app-secret"],
+          errors: ["Authorization: Bearer user-secret"],
+        },
+      ],
+      overall: emptyManagerAkahuSyncSummaryCounts(),
+    })
+
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
+  await flushSyncControllerPromises()
+
+  expect(controllerState.stateRef.current).toMatchObject({
+    _tag: "completed",
+    summary: {
+      accounts: [
+        {
+          warnings: ["Akahu App Token: [redacted]"],
+          errors: ["Authorization: [redacted]"],
+        },
+      ],
+    },
+  })
+})
+
+it("redacts credential-looking values in fallback dialog text", () => {
+  expect(sanitizeManagerAkahuSyncDialogText("akahuUserToken=secret-value")).toBe(
+    "akahuUserToken=[redacted]",
+  )
 })

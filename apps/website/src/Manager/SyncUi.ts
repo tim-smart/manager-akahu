@@ -78,3 +78,23 @@ export const canStartManagerAkahuSyncDialog = (
 
 export const canCloseManagerAkahuSyncDialog = (state: ManagerAkahuSyncDialogState): boolean =>
   state._tag !== "running"
+
+export const sanitizeManagerAkahuSyncDialogText = (text: string): string =>
+  text
+    .replace(/((?:Akahu\s+)?(?:App|User)\s+Token["']?\s*[:=]\s*)[^\s,;)}\]]+/gi, "$1[redacted]")
+    .replace(
+      /((?:akahuAppToken|akahuUserToken|app_token|user_token|x-akahu-app-token|x-akahu-user-token)["']?\s*[:=]\s*)[^\s,;)}\]]+/gi,
+      "$1[redacted]",
+    )
+    .replace(/(Authorization["']?\s*[:=]\s*)(?:Bearer\s+)?[^\s,;)}\]]+/gi, "$1[redacted]")
+
+export const sanitizeManagerAkahuTransactionSyncSummary = (
+  summary: ManagerAkahuTransactionSyncSummary,
+): ManagerAkahuTransactionSyncSummary => ({
+  ...summary,
+  accounts: summary.accounts.map((accountSummary) => ({
+    ...accountSummary,
+    warnings: accountSummary.warnings.map(sanitizeManagerAkahuSyncDialogText),
+    errors: accountSummary.errors.map(sanitizeManagerAkahuSyncDialogText),
+  })),
+})

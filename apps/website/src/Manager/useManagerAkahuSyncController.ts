@@ -8,6 +8,8 @@ import {
   failManagerAkahuSyncDialog,
   initialManagerAkahuSyncDialogState,
   openManagerAkahuSyncDialog,
+  sanitizeManagerAkahuSyncDialogText,
+  sanitizeManagerAkahuTransactionSyncSummary,
   startManagerAkahuSyncDialog,
   type ManagerAkahuSyncDialogState,
 } from "./SyncUi"
@@ -78,13 +80,19 @@ export const startManagerAkahuSyncController = (input: {
       (summary) => {
         input.inFlightRef.current = false
         updateManagerAkahuSyncControllerState(input.controllerState, (current) =>
-          completeManagerAkahuSyncDialog(current, summary),
+          completeManagerAkahuSyncDialog(
+            current,
+            sanitizeManagerAkahuTransactionSyncSummary(summary),
+          ),
         )
       },
       () => {
         input.inFlightRef.current = false
         updateManagerAkahuSyncControllerState(input.controllerState, (current) =>
-          failManagerAkahuSyncDialog(current, managerAkahuSyncFailureMessage),
+          failManagerAkahuSyncDialog(
+            current,
+            sanitizeManagerAkahuSyncDialogText(managerAkahuSyncFailureMessage),
+          ),
         )
       },
     )
