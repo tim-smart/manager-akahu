@@ -403,6 +403,16 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Move the compatibility tests out of `packages/manager-api/tests/index.test.ts` into a focused `ManagerCompatibility.test.ts`, leaving `index.test.ts` as a barrel/package-name smoke test. The current test file is already becoming a grab bag and will grow harder to scan as more compatibility cases are added.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
+### Task 1 follow-up review: Consolidate Manager suspense import boundary
+
+- Replace the public receipt/payment builder pair with one canonical Manager suspense import decision helper before sync code depends on them. The helper should accept the signed normalized amount, account key, date/reference/description/fdxTransactionId, clearance, and any importability decision needed at this layer, then return a discriminated union for receipt payload, payment payload, or an explicit skip reason. Keep receipt/payment-specific constructors private implementation details if they still help locally.
+- Use that helper as the owner of positive-vs-negative classification, absolute amount conversion, and zero-amount skipping so later sync orchestration does not grow ad-hoc conditionals around `buildManagerSuspenseReceiptPayload` and `buildManagerSuspensePaymentPayload`.
+- Keep the precise required-`value` payload types, but derive or assert them against the generated `ManagerPostReceipt` and `ManagerPostPayment` endpoint wrapper contracts. Add compile-time assignability assertions or `satisfies` checks so this compatibility module fails when the generated POST wrapper shape drifts.
+- Tie the suspense line type to the generated receipt/payment line element contracts while still requiring the verified local `amount` and `lineDescription` fields. Avoid hand-maintaining a parallel line schema that could drift from the generated Manager client.
+- Make the normalized amount boundary explicit with a named type such as `ManagerLineAmount` or a branded normalized decimal string once the decimal helper exists. At minimum, name the canonical helper input so it is clear the value must already be normalized and absolute where appropriate.
+- Update focused compatibility tests to cover the canonical decision helper for positive receipt, negative payment, zero skip, settled clearance, pending clearance, direct payload shapes, and generated endpoint assignability.
+- Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
+
 ### Task 2: Pagination foundations
 
 - Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present.
