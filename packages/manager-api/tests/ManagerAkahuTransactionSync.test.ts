@@ -1,4 +1,4 @@
-import { AkahuTransactionDate, getAkahuTransactionCalendarDate } from "@app/domain/Akahu"
+import { AkahuTransactionDate } from "@app/domain/Akahu"
 import { BigDecimal, Schema } from "effect"
 import { expect, test } from "@effect/vitest"
 import type { ManagerPaymentItem, ManagerReceiptItem } from "../src/index.ts"
@@ -11,7 +11,6 @@ import {
   decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
   emptyManagerAkahuSyncSummaryCounts,
-  formatManagerAkahuDate,
   incrementManagerAkahuSyncSummaryCount,
   managerAkahuPendingFingerprintPrefix,
   managerAkahuSyncSummaryCountKeys,
@@ -89,13 +88,14 @@ const pendingPayment = (
     lines: [{ amount: options.amount ?? "9.99", lineDescription: options.description ?? "Shop" }],
   })
 
-test("formats Manager dates by preserving Akahu string calendar dates", () => {
+test("decoded Akahu transaction dates preserve raw strings and expose Manager calendar dates", () => {
   const offsetDate = akahuDate("2026-06-05T00:30:00.000+13:00")
-  expect(offsetDate).toBe("2026-06-05T00:30:00.000+13:00")
-  expect(getAkahuTransactionCalendarDate(offsetDate)).toBe("2026-06-05")
-  expect(formatManagerAkahuDate(offsetDate)).toBe("2026-06-05")
-  expect(formatManagerAkahuDate(akahuDate("2026-06-04T23:30:00.000-10:00"))).toBe("2026-06-04")
-  expect(formatManagerAkahuDate(akahuDate("2026-06-05"))).toBe("2026-06-05")
+  expect(offsetDate).toEqual({
+    raw: "2026-06-05T00:30:00.000+13:00",
+    calendarDate: "2026-06-05",
+  })
+  expect(akahuDate("2026-06-04T23:30:00.000-10:00").calendarDate).toBe("2026-06-04")
+  expect(akahuDate("2026-06-05")).toEqual({ raw: "2026-06-05", calendarDate: "2026-06-05" })
 })
 
 test("rejects Akahu transaction dates with invalid calendar components", () => {

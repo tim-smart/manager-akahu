@@ -1,5 +1,5 @@
 import { BigDecimal, Option } from "effect"
-import { getAkahuTransactionCalendarDate, type AkahuTransactionDate } from "@app/domain/Akahu"
+import { type AkahuTransactionDate } from "@app/domain/Akahu"
 import { parseCalendarDate, type CalendarDateParts } from "@app/domain/CalendarDate"
 import {
   buildManagerSuspenseImportDecision,
@@ -163,9 +163,6 @@ export const addManagerAkahuSyncSummaryCounts = (
   return next
 }
 
-export const formatManagerAkahuDate = (date: AkahuTransactionDate): string =>
-  getAkahuTransactionCalendarDate(date)
-
 const toBigDecimal = (
   amount: ManagerAkahuDecimalInput,
 ): ManagerAkahuAmountNormalizationDecision => {
@@ -217,7 +214,7 @@ export const buildAkahuPendingTransactionFingerprint = (
     return { _tag: "unsupported", warning: `Unsupported pending amount: ${amount.input}` }
   }
 
-  const date = formatManagerAkahuDate(input.date)
+  const date = input.date.calendarDate
   const normalizedDescription = normalizeAkahuTransactionDescription(input.description)
   return {
     _tag: "fingerprint",
@@ -238,7 +235,7 @@ export const classifyManagerAkahuSuspenseImport = (
 
   const managerDecision = buildManagerSuspenseImportDecision({
     bankOrCashAccountKey: input.bankOrCashAccountKey,
-    date: formatManagerAkahuDate(input.date),
+    date: input.date.calendarDate,
     signedNormalizedAmount: amount.amount,
     reference: input.reference,
     description: input.description,
@@ -356,7 +353,7 @@ export const decidePendingToSettledMatch = (
     return { _tag: "unsupported", warning: "Zero settled amounts cannot match pending entries." }
   }
 
-  const settledDate = formatManagerAkahuDate(input.settledDate)
+  const settledDate = input.settledDate.calendarDate
   const settledDay = parseManagerCalendarDayNumber(settledDate)
   if (settledDay === undefined) {
     return { _tag: "unsupported", warning: `Unsupported settled date: ${settledDate}` }

@@ -35,30 +35,29 @@ const getLeadingAkahuCalendarDate = (value: string): string | undefined => {
   return parseCalendarDate(calendarDate)?.date
 }
 
-export const AkahuTransactionDate: Schema.refine<
-  string & Brand.Brand<"akahu/TransactionDate">,
-  Schema.String
-> = Schema.String.pipe(
-  Schema.refine(
-    (value): value is string & Brand.Brand<"akahu/TransactionDate"> => {
-      return getLeadingAkahuCalendarDate(value) !== undefined
-    },
-    {
-      identifier: "akahu/TransactionDate",
-      message: "Akahu transaction date must start with a valid yyyy-mm-dd calendar date",
-    },
-  ),
+const parseAkahuTransactionDate = (
+  raw: string,
+): { readonly raw: string; readonly calendarDate: string } | undefined => {
+  const calendarDate = getLeadingAkahuCalendarDate(raw)
+  return calendarDate === undefined ? undefined : { raw, calendarDate }
+}
+
+const AkahuTransactionDateValue = Schema.Struct({
+  raw: Schema.String,
+  calendarDate: Schema.String,
+})
+
+export const AkahuTransactionDate = Schema.String.pipe(
+  Schema.refine((value): value is string => parseAkahuTransactionDate(value) !== undefined, {
+    identifier: "akahu/TransactionDate",
+    message: "Akahu transaction date must start with a valid yyyy-mm-dd calendar date",
+  }),
+  Schema.decodeTo(AkahuTransactionDateValue, {
+    decode: SchemaGetter.transform((raw) => parseAkahuTransactionDate(raw)!),
+    encode: SchemaGetter.transform((date) => date.raw),
+  }),
 )
 export type AkahuTransactionDate = typeof AkahuTransactionDate.Type
-
-export const getAkahuTransactionCalendarDate = (date: AkahuTransactionDate): string => {
-  const calendarDate = getLeadingAkahuCalendarDate(date)
-  if (calendarDate === undefined) {
-    throw new Error(`Akahu transaction date invariant violated: ${date}`)
-  }
-
-  return calendarDate
-}
 
 export class Transaction extends Schema.Class<Transaction>("akahu/Transaction")({
   _id: Schema.String,
