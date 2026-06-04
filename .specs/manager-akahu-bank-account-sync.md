@@ -179,6 +179,16 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 6 classified PUT update follow-up collapsed exact pending-fingerprint updates and pending-to-settled replacements through one `putManagerAkahuClassifiedUpdate` writer in `apps/website/src/Manager/SyncFlows.ts`. The writer selects the Manager receipt/payment `PUT` endpoint from the classified suspense import decision, maps Manager write errors once, and constructs local exact update payloads with required `key` and required canonical suspense receipt/payment `value` rather than returning broad generated wrappers with optional fields.
 - Task 6 update-state follow-up collapsed exact pending-fingerprint updates and pending-to-settled replacements through one local account-state helper in `apps/website/src/Manager/SyncFlows.ts`. The helper owns the kind-mismatch guard, classified `PUT`, write-error to account-error mapping, post-success processed `fdxTransactionId` recording, and post-success `pendingUpdated`/`pendingSettled` increment. Focused mocked tests now cover exact pending and pending-to-settled `PUT` failures, including duplicate input rows proving failed updates are not marked processed and do not suppress later attempts.
 
+### Task 7 UI sync slice findings
+
+- `apps/website/src/Manager/atoms.ts` now exposes `akahuTransactionSyncAtom`, a website mutation atom that runs the existing `ManagerSyncFlows.syncTransactions` service through the existing ApiClient/Manager layers without changing transaction import semantics.
+- `apps/website/src/main.tsx` now renders ready-state per-account `Sync ...` buttons and a `Sync all` button. Buttons are disabled while a sync is running in the current tab.
+- The first sync modal slice is local to the website and uses explicit confirmation, running, completed, and failed states. Running state disables Cancel/Close, ignores overlay/Escape close attempts, and tells the user to keep the window open.
+- Current-tab duplicate prevention uses both the modal state transition and an immediate in-flight ref guard before invoking the atom mutation, so double-clicks cannot start a second sync before React state has re-rendered.
+- `apps/website/src/Manager/SyncUi.ts` contains pure sync-dialog transitions and summary label metadata for focused tests. The UI stores selected linked accounts and returned summaries, but no Akahu credential values.
+- The first modal slice shows all overall and per-account summary counts plus per-account warnings/errors after completion. During running it shows account queued/running status from the known selected account list; the sync service does not yet stream live per-transaction progress.
+- Focused website tests in `apps/website/tests/ManagerSyncFlows.test.ts` cover duplicate-start transition blocking, non-closable running modal state, and completed modal summary preservation. `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass for this slice; website build still reports Vite's existing large-chunk warning.
+
 ## Requirements
 
 ### Setup-state UI
@@ -830,17 +840,17 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the current phase shape for Task 7 UI wiring: one account orchestration path fetches Manager sync read/importability once, then runs the settled phase before the pending phase when supported and when the settled stream did not fail. Do not reintroduce settled-only service names, compatibility aliases for the old hidden API, or duplicated settled/pending receipt/payment POST plumbing. (completed)
 - Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passing.
 
-### Task 7: Sync atoms, linked-account sync UI, and confirmation/progress modal
+### Task 7: Sync atoms, linked-account sync UI, and confirmation/progress modal (completed)
 
-- Add sync atom/mutation state that invokes the completed sync service and prevents concurrent sync in the current tab.
-- Refactor UI into smaller components as needed.
-- Add local shadcn-style primitives needed for cards, alerts, badges, dialog, and progress while matching existing component style.
-- In ready state, show working per-account Sync and Sync all buttons.
-- Implement confirmation, running/progress, completion, and failure modal states.
-- Disable closing and duplicate starts while running.
-- Show all summary counts and warnings/errors without exposing credentials.
-- Refresh setup state after completion only if useful and safe.
-- Validation: website build/typecheck, helper/service tests, and any available UI/state tests pass.
+- Add sync atom/mutation state that invokes the completed sync service and prevents concurrent sync in the current tab. (completed)
+- Refactor UI into smaller components as needed. (completed locally in `main.tsx`; pure transition state lives in `Manager/SyncUi.ts`)
+- Add local shadcn-style primitives needed for cards, alerts, badges, dialog, and progress while matching existing component style. (completed with existing `Button` and local semantic modal/summary markup; no new shadcn components were necessary for this first slice)
+- In ready state, show working per-account Sync and Sync all buttons. (completed)
+- Implement confirmation, running/progress, completion, and failure modal states. (completed; live per-transaction progress remains unavailable because the sync service currently returns one final summary)
+- Disable closing and duplicate starts while running. (completed)
+- Show all summary counts and warnings/errors without exposing credentials. (completed; the UI state does not carry Akahu token values)
+- Refresh setup state after completion only if useful and safe. (not completed; no setup refresh was added because sync does not currently change linked-account setup state)
+- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass. Website build reports Vite's existing large-chunk warning.
 
 ## Open questions
 

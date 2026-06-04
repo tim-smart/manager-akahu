@@ -19,12 +19,22 @@ import type {
   ManagerSuspensePaymentPayload,
   ManagerSuspenseReceiptPayload,
 } from "@app/manager-api/ManagerCompatibility"
+import { emptyManagerAkahuSyncSummaryCounts } from "@app/manager-api/ManagerAkahuTransactionSync"
 import { BigDecimal, DateTime, Effect, Redacted, Schema, Stream } from "effect"
 import { expect, it } from "@effect/vitest"
 import {
   syncManagerAkahuTransactions,
   type ManagerAkahuTransactionSyncManagerClient,
 } from "../src/Manager/SyncFlows.ts"
+import {
+  canCloseManagerAkahuSyncDialog,
+  canStartManagerAkahuSyncDialog,
+  closeManagerAkahuSyncDialog,
+  completeManagerAkahuSyncDialog,
+  initialManagerAkahuSyncDialogState,
+  openManagerAkahuSyncDialog,
+  startManagerAkahuSyncDialog,
+} from "../src/Manager/SyncUi.ts"
 
 const accountId = Schema.decodeSync(AccountId)("akahu-checking")
 const userId = Schema.decodeSync(UserId)("user-1")
@@ -316,6 +326,47 @@ const runTransactionSync = (options: {
       options.fetchPendingTransactions?.(request) ??
       Stream.fromIterable(options.pendingTransactionsByAccount?.[request.accountId] ?? []),
   })
+
+it("prevents duplicate modal starts and closing while sync is running", () => {
+  const confirming = openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [
+    linkedAccount(),
+  ])
+  expect(confirming._tag).toBe("confirming")
+  expect(canStartManagerAkahuSyncDialog(confirming)).toBe(true)
+
+  const running = startManagerAkahuSyncDialog(confirming)
+  expect(running._tag).toBe("running")
+  expect(canStartManagerAkahuSyncDialog(running)).toBe(false)
+  expect(startManagerAkahuSyncDialog(running)).toBe(running)
+  expect(canCloseManagerAkahuSyncDialog(running)).toBe(false)
+  expect(closeManagerAkahuSyncDialog(running)).toBe(running)
+})
+
+it("keeps the running modal selection when completion summary is shown", () => {
+  const account = linkedAccount()
+  const running = startManagerAkahuSyncDialog(
+    openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account]),
+  )
+  const summary = {
+    accounts: [
+      {
+        account,
+        counts: { ...emptyManagerAkahuSyncSummaryCounts(), receiptsCreated: 1, warnings: 1 },
+        warnings: ["Foreign-currency account skipped."],
+        errors: [],
+      },
+    ],
+    overall: { ...emptyManagerAkahuSyncSummaryCounts(), receiptsCreated: 1, warnings: 1 },
+  }
+
+  const completed = completeManagerAkahuSyncDialog(running, summary)
+  expect(completed._tag).toBe("completed")
+  if (completed._tag !== "completed") return
+  expect(completed.accounts).toEqual([account])
+  expect(completed.summary.overall.receiptsCreated).toBe(1)
+  expect(completed.summary.accounts[0]?.warnings).toEqual(["Foreign-currency account skipped."])
+  expect(canCloseManagerAkahuSyncDialog(completed)).toBe(true)
+})
 
 it.effect(
   "creates Manager receipt and payment payloads for settled positive and negative amounts",
