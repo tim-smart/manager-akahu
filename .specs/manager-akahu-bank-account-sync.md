@@ -100,8 +100,8 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Full `pnpm ready` validation was attempted for the Manager pagination helper change but currently stops during root lint because `apps/server/tests/Akahu.test.ts` cannot resolve `@app/domain/Akahu`; targeted `@app/manager-api` test, build, and check validation passes for this change.
 - Task 2 follow-up consolidated Manager receipt/payment paging through one private batch helper that owns `Skip`, `PageSize`, page item accumulation, and the fewer-than-page-size stop condition while preserving endpoint-specific public receipt/payment fetch functions.
 - `fetchManagerBankOrCashAccountSyncRead` is now the canonical Manager sync read helper for one bank/cash account. It fetches complete receipts and payments in parallel, then returns the separate arrays plus typed `existingFdxTransactionIdEntries` and an `existingFdxTransactionIdIndex` keyed by `fdxTransactionId` for later de-duplication.
-- Public Manager batch reads now require `pageSize`, when provided, to be a positive safe integer. Invalid values such as fractional, zero, negative, or non-finite numbers are rejected instead of silently truncating or clamping.
-- Focused manager-api tests now cover both receipt and payment paths through the shared pager, the canonical sync-read helper, duplicate `fdxTransactionId` entries beyond the first page for both resource types, strict `pageSize` rejection, and expected request sequences. `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass for this follow-up.
+- Public Manager batch reads no longer expose `pageSize` on `ManagerBankOrCashAccountBatchReadInput`; production receipt/payment sync reads always use `managerBatchReadDefaultPageSize` for Manager `PageSize` requests.
+- Focused manager-api tests now cover both receipt and payment paths through the shared pager, the canonical sync-read helper, duplicate `fdxTransactionId` entries beyond the first default-size page for both resource types, and expected request sequences without public page-size overrides. `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass for this follow-up review.
 
 ## Requirements
 
@@ -455,11 +455,11 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Update focused tests to cover the shared pager through both receipt and payment paths, the combined sync-read helper, duplicate `fdxTransactionId` values beyond the first page in both resource types, and the expected request sequences. (completed)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
-### Task 2 follow-up review: Simplify Manager batch page-size boundary
+### Task 2 follow-up review: Simplify Manager batch page-size boundary (completed)
 
-- Revisit `ManagerBankOrCashAccountBatchReadInput.pageSize`. It currently exposes what appears to be a test/configuration knob on the production public sync-read API, so every future caller inherits an optional pagination mode even though normal sync code should use one canonical Manager page size.
-- Prefer the code-judo simplification: remove `pageSize` from the public read input and keep `managerBatchReadDefaultPageSize` as the only production path. Focused tests can still exercise multi-page behavior by returning full default-size pages from mocks, which deletes the invalid-page-size branch and the public contract surface entirely.
-- If a real production caller needs configurable page sizes, model the boundary explicitly instead of throwing a raw `RangeError` inside `Effect.gen`. Add a small typed Manager pagination input error, return it in the Effect error channel, and update tests to assert the typed failure. Invalid public input should not escape as an untyped defect that future sync orchestration cannot report through normal Effect error handling.
+- Revisit `ManagerBankOrCashAccountBatchReadInput.pageSize`. It currently exposes what appears to be a test/configuration knob on the production public sync-read API, so every future caller inherits an optional pagination mode even though normal sync code should use one canonical Manager page size. (completed)
+- Prefer the code-judo simplification: remove `pageSize` from the public read input and keep `managerBatchReadDefaultPageSize` as the only production path. Focused tests can still exercise multi-page behavior by returning full default-size pages from mocks, which deletes the invalid-page-size branch and the public contract surface entirely. (completed)
+- If a real production caller needs configurable page sizes, model the boundary explicitly instead of throwing a raw `RangeError` inside `Effect.gen`. Add a small typed Manager pagination input error, return it in the Effect error channel, and update tests to assert the typed failure. Invalid public input should not escape as an untyped defect that future sync orchestration cannot report through normal Effect error handling. (not needed; there is no public page-size input after this review)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary

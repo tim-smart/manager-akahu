@@ -14,7 +14,6 @@ export const managerBatchReadDefaultPageSize = 100
 export interface ManagerBankOrCashAccountBatchReadInput {
   readonly bankOrCashAccountKey: string
   readonly business?: string | undefined
-  readonly pageSize?: number | undefined
 }
 
 export type ManagerReceiptBatchClient = Pick<Client, "GET/api4/receipt-batch">
@@ -44,18 +43,6 @@ export interface ManagerBankOrCashAccountSyncRead {
     string,
     ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
   >
-}
-
-const getManagerBatchPageSize = (pageSize: number | undefined): number => {
-  if (pageSize === undefined) {
-    return managerBatchReadDefaultPageSize
-  }
-
-  if (!Number.isSafeInteger(pageSize) || pageSize < 1) {
-    throw new RangeError("Manager batch pageSize must be a positive safe integer")
-  }
-
-  return pageSize
 }
 
 const buildManagerReceiptBatchParams = (
@@ -91,7 +78,7 @@ const fetchAllManagerBatchItems = <Params, Page, Item, Error, Requirements>(opti
   readonly getItems: (page: Page) => ReadonlyArray<Item> | null | undefined
 }): Effect.Effect<Array<Item>, Error, Requirements> =>
   Effect.gen(function* () {
-    const pageSize = getManagerBatchPageSize(options.input.pageSize)
+    const pageSize = managerBatchReadDefaultPageSize
     const items: Array<Item> = []
 
     for (let skip = 0; ; skip += pageSize) {
