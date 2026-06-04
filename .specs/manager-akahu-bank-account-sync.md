@@ -636,6 +636,15 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add focused tests that decoded Akahu transactions preserve an offset raw date string while exposing the derived Manager calendar date, invalid Akahu calendar components still fail at the domain/RPC decode boundary, and Manager existing-entry dates still require exact `yyyy-mm-dd` parsing. (completed)
 - Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build` pass.
 
+### Task 4 follow-up review follow-up audit follow-up review follow-up: Make decoded Akahu transaction dates nominal and single-pass
+
+- Tighten `packages/domain/src/Akahu.ts` so the decoded `AkahuTransactionDate` is not just a forgeable structural `{ raw: string; calendarDate: string }` with two plain strings. Preserve the decoded boundary, but make the value nominal/opaque through a schema class, brand, refined struct, or equivalent local model so manager-api cannot accidentally accept hand-built inconsistent dates such as `{ raw: "2026-06-05T00:30:00.000+13:00", calendarDate: "not-a-date" }` as a proven domain value.
+- Make the `calendarDate` member itself carry the canonical exact calendar-date invariant, and ensure it is derived from and consistent with `raw` rather than independently assignable. The manager-api sync helper should be able to trust `date.calendarDate` because the domain decoder proved it, not because callers happened to construct a matching object.
+- Collapse the current `Schema.refine` plus `Schema.decodeTo(... parseAkahuTransactionDate(raw)!)` shape into one fallible decode/transform that parses the raw Akahu date once and returns the decoded value or a schema issue. This removes duplicate parsing and the non-null assertion at the core boundary instead of preserving the old defensive-invariant style inside the new decoded model.
+- Add focused regression coverage for the real boundary being protected: decoded values used by manager-api should come from the domain decoder or an explicit unsafe test helper; inconsistent structural dates should not satisfy the public type without an intentional escape hatch; and a schema/RPC serialization round trip should prove external raw Akahu date strings still decode to `{ raw, calendarDate }` while malformed calendar components fail before sync code sees them.
+- Keep Manager existing receipt/payment date handling separate from Akahu raw-date handling. This follow-up should not reintroduce `formatManagerAkahuDate`, route Manager dates through Akahu helpers, or add another pass-through wrapper around `date.calendarDate`.
+- Validation: run `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build`.
+
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
 - Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
