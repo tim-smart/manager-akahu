@@ -27,49 +27,63 @@ export type ManagerAkahuSyncController = {
 export const managerAkahuSyncFailureMessage =
   "Transaction sync failed before a summary was available. Check the Manager and Akahu connection, then try again."
 
-export type SetManagerAkahuSyncDialogState = (
-  state:
-    | ManagerAkahuSyncDialogState
-    | ((state: ManagerAkahuSyncDialogState) => ManagerAkahuSyncDialogState),
-) => void
+export type SetManagerAkahuSyncDialogState = (state: ManagerAkahuSyncDialogState) => void
 
 export type ManagerAkahuSyncInFlightRef = { current: boolean }
+export type ManagerAkahuSyncDialogStateRef = { current: ManagerAkahuSyncDialogState }
 
-export const closeManagerAkahuSyncController = (setState: SetManagerAkahuSyncDialogState): void => {
-  setState((current) => closeManagerAkahuSyncDialog(current))
+export type ManagerAkahuSyncControllerState = {
+  readonly stateRef: ManagerAkahuSyncDialogStateRef
+  readonly setState: SetManagerAkahuSyncDialogState
+}
+
+const setManagerAkahuSyncControllerState = (
+  controllerState: ManagerAkahuSyncControllerState,
+  state: ManagerAkahuSyncDialogState,
+): void => {
+  controllerState.stateRef.current = state
+  controllerState.setState(state)
+}
+
+const updateManagerAkahuSyncControllerState = (
+  controllerState: ManagerAkahuSyncControllerState,
+  transition: (state: ManagerAkahuSyncDialogState) => ManagerAkahuSyncDialogState,
+): void => {
+  setManagerAkahuSyncControllerState(controllerState, transition(controllerState.stateRef.current))
+}
+
+export const closeManagerAkahuSyncController = (
+  controllerState: ManagerAkahuSyncControllerState,
+): void => {
+  updateManagerAkahuSyncControllerState(controllerState, closeManagerAkahuSyncDialog)
 }
 
 export const startManagerAkahuSyncController = (input: {
   readonly inFlightRef: ManagerAkahuSyncInFlightRef
-  readonly setState: SetManagerAkahuSyncDialogState
+  readonly controllerState: ManagerAkahuSyncControllerState
   readonly runTransactionSync: RunManagerAkahuTransactionSync
 }): void => {
-  let accounts: ReadonlyArray<LinkedAccount> | undefined
-  input.setState((current) => {
-    if (!canStartManagerAkahuSyncDialog(current) || input.inFlightRef.current) {
-      return current
-    }
-
-    accounts = current.accounts
-    return startManagerAkahuSyncDialog(current)
-  })
-
-  if (accounts === undefined) {
+  const current = input.controllerState.stateRef.current
+  if (!canStartManagerAkahuSyncDialog(current) || input.inFlightRef.current) {
     return
   }
-  const selectedAccounts = accounts
+
+  const selectedAccounts = current.accounts
   input.inFlightRef.current = true
+  setManagerAkahuSyncControllerState(input.controllerState, startManagerAkahuSyncDialog(current))
 
   void Promise.resolve()
     .then(() => input.runTransactionSync({ accounts: selectedAccounts }))
     .then(
       (summary) => {
         input.inFlightRef.current = false
-        input.setState((current) => completeManagerAkahuSyncDialog(current, summary))
+        updateManagerAkahuSyncControllerState(input.controllerState, (current) =>
+          completeManagerAkahuSyncDialog(current, summary),
+        )
       },
       () => {
         input.inFlightRef.current = false
-        input.setState((current) =>
+        updateManagerAkahuSyncControllerState(input.controllerState, (current) =>
           failManagerAkahuSyncDialog(current, managerAkahuSyncFailureMessage),
         )
       },
@@ -82,18 +96,22 @@ export const useManagerAkahuSyncController = (
   const [state, setState] = useState<ManagerAkahuSyncDialogState>(
     initialManagerAkahuSyncDialogState,
   )
+  const stateRef = useRef<ManagerAkahuSyncDialogState>(initialManagerAkahuSyncDialogState)
   const inFlightRef = useRef(false)
+  const controllerState = { stateRef, setState }
 
   const open = (accounts: ReadonlyArray<LinkedAccount>) => {
-    setState((current) => openManagerAkahuSyncDialog(current, accounts))
+    updateManagerAkahuSyncControllerState(controllerState, (current) =>
+      openManagerAkahuSyncDialog(current, accounts),
+    )
   }
 
   const close = () => {
-    closeManagerAkahuSyncController(setState)
+    closeManagerAkahuSyncController(controllerState)
   }
 
   const start = () => {
-    startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+    startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
   }
 
   return {

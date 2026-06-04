@@ -8,8 +8,8 @@ import {
   closeManagerAkahuSyncController,
   managerAkahuSyncFailureMessage,
   startManagerAkahuSyncController,
+  type ManagerAkahuSyncControllerState,
   type RunManagerAkahuTransactionSync,
-  type SetManagerAkahuSyncDialogState,
 } from "../src/Manager/useManagerAkahuSyncController.ts"
 import {
   initialManagerAkahuSyncDialogState,
@@ -56,12 +56,46 @@ const flushSyncControllerPromises = async () => {
   await Promise.resolve()
 }
 
+const immediateControllerState = (
+  initialState: ManagerAkahuSyncDialogState,
+): ManagerAkahuSyncControllerState => {
+  const stateRef = { current: initialState }
+  return {
+    stateRef,
+    setState: (next) => {
+      stateRef.current = next
+    },
+  }
+}
+
+const deferredControllerState = (initialState: ManagerAkahuSyncDialogState) => {
+  let renderedState = initialState
+  const queuedStates: Array<ManagerAkahuSyncDialogState> = []
+  const stateRef = { current: initialState }
+  const controllerState: ManagerAkahuSyncControllerState = {
+    stateRef,
+    setState: (next) => {
+      queuedStates.push(next)
+    },
+  }
+
+  return {
+    controllerState,
+    renderedState: () => renderedState,
+    pendingStateCount: () => queuedStates.length,
+    flushRenderedState: () => {
+      for (const state of queuedStates.splice(0)) {
+        renderedState = state
+      }
+    },
+  }
+}
+
 it("invokes the sync mutation only once when Start is clicked twice before rerender", async () => {
   const account = linkedAccount()
-  let state = openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account])
-  const setState: SetManagerAkahuSyncDialogState = (next) => {
-    state = typeof next === "function" ? next(state) : next
-  }
+  const controllerState = immediateControllerState(
+    openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account]),
+  )
   const inFlightRef = { current: false }
   let resolveSync: (summary: ManagerAkahuTransactionSyncSummary) => void = () => {}
   const syncPromise = new Promise<ManagerAkahuTransactionSyncSummary>((resolve) => {
@@ -72,27 +106,82 @@ it("invokes the sync mutation only once when Start is clicked twice before reren
     syncCalls += 1
     return syncPromise
   }
-  expect(state._tag).toBe("confirming")
+  expect(controllerState.stateRef.current._tag).toBe("confirming")
 
-  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
-  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
 
-  expect(state._tag).toBe("running")
+  expect(controllerState.stateRef.current._tag).toBe("running")
   await Promise.resolve()
   expect(syncCalls).toBe(1)
 
   resolveSync(summaryFor(account))
   await syncPromise
   await flushSyncControllerPromises()
-  expect(state._tag).toBe("completed")
+  expect(controllerState.stateRef.current._tag).toBe("completed")
+})
+
+it("starts atomically with a deferred React-style state setter", async () => {
+  const account = linkedAccount()
+  const { controllerState, renderedState, flushRenderedState, pendingStateCount } =
+    deferredControllerState(
+      openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account]),
+    )
+  const inFlightRef = { current: false }
+  let syncCalls = 0
+  const runTransactionSync: RunManagerAkahuTransactionSync = ({ accounts }) => {
+    syncCalls += 1
+    expect(accounts).toEqual([account])
+    return Promise.resolve(summaryFor(account))
+  }
+  expect(renderedState()._tag).toBe("confirming")
+
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
+
+  expect(controllerState.stateRef.current._tag).toBe("running")
+  expect(inFlightRef.current).toBe(true)
+  expect(pendingStateCount()).toBe(1)
+  expect(syncCalls).toBe(0)
+
+  flushRenderedState()
+  expect(renderedState()._tag).toBe("running")
+  await flushSyncControllerPromises()
+
+  expect(syncCalls).toBe(1)
+  expect(inFlightRef.current).toBe(false)
+  expect(controllerState.stateRef.current._tag).toBe("completed")
+  flushRenderedState()
+  expect(renderedState()._tag).toBe("completed")
+})
+
+it("does not enqueue running or launch sync from a deferred invalid start", async () => {
+  const account = linkedAccount()
+  const { controllerState, renderedState, flushRenderedState, pendingStateCount } =
+    deferredControllerState(initialManagerAkahuSyncDialogState)
+  const inFlightRef = { current: false }
+  let syncCalls = 0
+  const runTransactionSync: RunManagerAkahuTransactionSync = () => {
+    syncCalls += 1
+    return Promise.resolve(summaryFor(account))
+  }
+
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
+  await flushSyncControllerPromises()
+  flushRenderedState()
+
+  expect(syncCalls).toBe(0)
+  expect(inFlightRef.current).toBe(false)
+  expect(pendingStateCount()).toBe(0)
+  expect(controllerState.stateRef.current._tag).toBe("closed")
+  expect(renderedState()._tag).toBe("closed")
 })
 
 it("does not launch sync from a stale start callback after the dialog leaves confirming", async () => {
   const account = linkedAccount()
-  let state = openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account])
-  const setState: SetManagerAkahuSyncDialogState = (next) => {
-    state = typeof next === "function" ? next(state) : next
-  }
+  const controllerState = immediateControllerState(
+    openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account]),
+  )
   const inFlightRef = { current: false }
   let syncCalls = 0
   const runTransactionSync: RunManagerAkahuTransactionSync = () => {
@@ -100,25 +189,24 @@ it("does not launch sync from a stale start callback after the dialog leaves con
     return Promise.resolve(summaryFor(account))
   }
   const staleStart = () => {
-    startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+    startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
   }
-  expect(state._tag).toBe("confirming")
+  expect(controllerState.stateRef.current._tag).toBe("confirming")
 
-  closeManagerAkahuSyncController(setState)
+  closeManagerAkahuSyncController(controllerState)
   staleStart()
   await flushSyncControllerPromises()
 
   expect(syncCalls).toBe(0)
   expect(inFlightRef.current).toBe(false)
-  expect(state._tag).toBe("closed")
+  expect(controllerState.stateRef.current._tag).toBe("closed")
 })
 
 it("recovers from a synchronous sync runner throw and allows a later valid start", async () => {
   const account = linkedAccount()
-  let state = openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account])
-  const setState: SetManagerAkahuSyncDialogState = (next) => {
-    state = typeof next === "function" ? next(state) : next
-  }
+  const controllerState = immediateControllerState(
+    openManagerAkahuSyncDialog(initialManagerAkahuSyncDialogState, [account]),
+  )
   const inFlightRef = { current: false }
   let syncCalls = 0
   const runTransactionSync: RunManagerAkahuTransactionSync = () => {
@@ -129,39 +217,36 @@ it("recovers from a synchronous sync runner throw and allows a later valid start
     return Promise.resolve(summaryFor(account))
   }
 
-  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
-  expect(state._tag).toBe("running")
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
+  expect(controllerState.stateRef.current._tag).toBe("running")
   expect(inFlightRef.current).toBe(true)
   await flushSyncControllerPromises()
 
   expect(syncCalls).toBe(1)
   expect(inFlightRef.current).toBe(false)
-  expect(state).toEqual({
+  expect(controllerState.stateRef.current).toEqual({
     _tag: "failed",
     accounts: [account],
     message: managerAkahuSyncFailureMessage,
   })
 
-  setState((current) => openManagerAkahuSyncDialog(current, [account]))
-  expect(state._tag).toBe("confirming")
-  startManagerAkahuSyncController({ inFlightRef, setState, runTransactionSync })
+  controllerState.setState(openManagerAkahuSyncDialog(controllerState.stateRef.current, [account]))
+  expect(controllerState.stateRef.current._tag).toBe("confirming")
+  startManagerAkahuSyncController({ inFlightRef, controllerState, runTransactionSync })
   await flushSyncControllerPromises()
 
   expect(syncCalls).toBe(2)
   expect(inFlightRef.current).toBe(false)
-  expect(state._tag).toBe("completed")
+  expect(controllerState.stateRef.current._tag).toBe("completed")
 })
 
 it("does not dismiss running sync state through controller close paths", () => {
   const account = linkedAccount()
-  let state: ManagerAkahuSyncDialogState = { _tag: "running", accounts: [account] }
-  const setState: SetManagerAkahuSyncDialogState = (next) => {
-    state = typeof next === "function" ? next(state) : next
-  }
-  expect(state._tag).toBe("running")
+  const controllerState = immediateControllerState({ _tag: "running", accounts: [account] })
+  expect(controllerState.stateRef.current._tag).toBe("running")
 
-  closeManagerAkahuSyncController(setState)
-  closeManagerAkahuSyncController(setState)
+  closeManagerAkahuSyncController(controllerState)
+  closeManagerAkahuSyncController(controllerState)
 
-  expect(state._tag).toBe("running")
+  expect(controllerState.stateRef.current._tag).toBe("running")
 })
