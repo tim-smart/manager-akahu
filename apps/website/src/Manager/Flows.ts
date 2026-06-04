@@ -1,5 +1,5 @@
 import { Manager } from "@/Manager"
-import { Cause, Context, Effect, Exit, Layer, Option, Resource, Schema } from "effect"
+import { Context, Effect, Layer, Option, Resource, Schema } from "effect"
 import {
   AkahuTokens,
   type AkahuCredentialFieldName,
@@ -13,6 +13,7 @@ import {
 } from "@app/domain/Manager/AkahuCustomFields"
 import { ApiClient } from "@/ApiClient"
 import type { Account } from "@app/domain/Akahu"
+import { AkahuRpcError } from "@app/domain/rpc"
 
 type ManagerAkahuAccountRecord = {
   readonly key: string
@@ -43,7 +44,7 @@ export class ManagerFlows extends Context.Service<
       const textFields = yield* Resource.manual(
         Effect.gen(function* () {
           return (yield* client["GET/api4/text-custom-field-batch"]()).items ?? []
-        }).pipe(Effect.orDie),
+        }),
       )
 
       const ensureCustomFields = Effect.gen(function* () {
@@ -60,7 +61,7 @@ export class ManagerFlows extends Context.Service<
           akahuAppToken,
           akahuUserToken,
         } as const
-      }).pipe(Effect.orDie)
+      })
 
       const createTextField = Effect.fn("ManagerFlows.createTextField")(function* (name: string) {
         yield* client["POST/api4/text-custom-field"]({
@@ -98,7 +99,7 @@ export class ManagerFlows extends Context.Service<
           })
         }
         return field
-      }, Effect.orDie)
+      })
 
       const createDropdownField = Effect.fn("ManagerFlows.createDropdownField")(function* (
         name: string,
@@ -146,19 +147,20 @@ export class ManagerFlows extends Context.Service<
         }
         const tokens = tokensOption.value
 
-        const accountsExit = yield* Effect.exit(api("ListAccounts", tokens))
-        if (Exit.isFailure(accountsExit)) {
-          if (isCredentialFailure(accountsExit.cause)) {
-            return new ManagerAkahuSetupInvalidCredentials()
-          }
-
-          return new ManagerAkahuSetupError({
-            message:
-              "Akahu accounts could not be loaded. Check the Akahu connection and try again.",
-          })
+        const accountsResult = yield* api("ListAccounts", tokens).pipe(
+          Effect.map((accounts) => ({ _tag: "accounts" as const, accounts })),
+          Effect.catchTag("AkahuRpcError", (error) =>
+            Effect.succeed({
+              _tag: "setupState" as const,
+              setupState: mapAkahuAccountsReadFailure(error),
+            }),
+          ),
+        )
+        if (accountsResult._tag === "setupState") {
+          return accountsResult.setupState
         }
 
-        const accounts = accountsExit.value
+        const accounts = accountsResult.accounts
         const accountField = yield* ensureAccountField({
           name: "Akahu Account",
           options: accounts.map((account) => ({
@@ -180,7 +182,7 @@ export class ManagerFlows extends Context.Service<
           staleSelections: selections.staleSelections,
         })
       }).pipe(
-        Effect.catchCause(() =>
+        Effect.catch(() =>
           Effect.succeed(
             new ManagerAkahuSetupError({
               message:
@@ -246,9 +248,16 @@ const getCredentialValue = (value: unknown): string | undefined => {
   return trimmed === "" ? undefined : trimmed
 }
 
-const isCredentialFailure = (cause: Cause.Cause<unknown>) => {
-  const error = Cause.pretty(cause)
-  return /\b(401|403|unauthorized|forbidden|expired)\b/i.test(error)
+export const mapAkahuAccountsReadFailure = (error: AkahuRpcError): ManagerAkahuSetupState => {
+  switch (error.reason) {
+    case "authentication":
+    case "authorization":
+      return new ManagerAkahuSetupInvalidCredentials()
+    case "read":
+      return new ManagerAkahuSetupError({
+        message: "Akahu accounts could not be loaded. Check the Akahu connection and try again.",
+      })
+  }
 }
 
 const encodeMultipleValue = (options: { readonly label: string; readonly value: string }) => {

@@ -2,7 +2,11 @@ import { expect, test } from "@effect/vitest"
 import { DateTime } from "effect"
 import { Account, type AccountId } from "@app/domain/Akahu"
 import { makeManagerAkahuSetupState } from "@app/domain/Manager/AkahuCustomFields"
-import { collectManagerAkahuAccountSelections } from "../src/Manager/Flows.ts"
+import { AkahuRpcError } from "@app/domain/rpc"
+import {
+  collectManagerAkahuAccountSelections,
+  mapAkahuAccountsReadFailure,
+} from "../src/Manager/Flows.ts"
 
 const akahuChecking = new Account({
   _id: "akahu-checking" as AccountId,
@@ -140,5 +144,26 @@ test("classifies setup state from Akahu account and Manager link availability", 
   expect(ready._tag).toBe("ready")
   if (ready._tag === "ready") {
     expect(ready.staleSelections).toHaveLength(1)
+  }
+})
+
+test("maps typed Akahu authentication failures to invalid credentials", () => {
+  expect(
+    mapAkahuAccountsReadFailure(new AkahuRpcError({ reason: "authentication", status: 401 }))._tag,
+  ).toBe("invalidCredentials")
+
+  expect(
+    mapAkahuAccountsReadFailure(new AkahuRpcError({ reason: "authorization", status: 403 }))._tag,
+  ).toBe("invalidCredentials")
+})
+
+test("maps typed retryable Akahu read failures to setup error", () => {
+  const state = mapAkahuAccountsReadFailure(new AkahuRpcError({ reason: "read", status: 500 }))
+
+  expect(state._tag).toBe("error")
+  if (state._tag === "error") {
+    expect(state.message).toBe(
+      "Akahu accounts could not be loaded. Check the Akahu connection and try again.",
+    )
   }
 })

@@ -1,5 +1,5 @@
 import { AccountId } from "@app/domain/Akahu"
-import { ApiRpcs } from "@app/domain/rpc"
+import { AkahuRpcError, ApiRpcs } from "@app/domain/rpc"
 import { Effect, Layer, Redacted, Schema, Stream } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { RpcTest } from "effect/unstable/rpc"
@@ -23,6 +23,7 @@ interface ExpectedAkahuRequest {
 interface ExpectedAkahuExchange {
   readonly request: ExpectedAkahuRequest
   readonly response: unknown
+  readonly status?: number
 }
 
 const makeApiRpcClient = () => RpcTest.makeClient(ApiRpcs)
@@ -105,7 +106,7 @@ const runWithMockAkahu = <A, E, R>(
       return HttpClientResponse.fromWeb(
         request,
         new Response(JSON.stringify(exchange.response), {
-          status: 200,
+          status: exchange.status ?? 200,
           headers: { "content-type": "application/json" },
         }),
       )
@@ -119,8 +120,9 @@ const runWithMockAkahu = <A, E, R>(
   return Effect.scoped(
     Effect.gen(function* () {
       const client = yield* makeApiRpcClient().pipe(Effect.provide(rpcLayer))
-      const result = yield* useClient(client)
-      yield* Effect.sync(() => expect(requestIndex).toBe(exchanges.length))
+      const result = yield* useClient(client).pipe(
+        Effect.ensuring(Effect.sync(() => expect(requestIndex).toBe(exchanges.length))),
+      )
       return result
     }),
   )
@@ -145,6 +147,24 @@ it.effect("ListAccounts returns all Akahu accounts across cursor pages", () =>
       (client) => client.ListAccounts(credentials),
     )
     expect(result.map((item) => item._id)).toEqual(["acc_1", "acc_2"])
+  }),
+)
+
+it.effect("ListAccounts preserves Akahu authentication failures as typed RPC errors", () =>
+  Effect.gen(function* () {
+    const error = yield* runWithMockAkahu(
+      [
+        {
+          request: expectedAkahuRequest({ pathname: "/v1/accounts" }),
+          response: { success: false },
+          status: 401,
+        },
+      ],
+      (client) => client.ListAccounts(credentials),
+    ).pipe(Effect.flip)
+
+    expect(error).toBeInstanceOf(AkahuRpcError)
+    expect(error).toMatchObject({ reason: "authentication", status: 401 })
   }),
 )
 
@@ -178,6 +198,30 @@ it.effect("AccountTransactions streams all settled transactions across cursor pa
         ),
     )
     expect(result.map((item) => item._id)).toEqual(["txn_1", "txn_2", "txn_3"])
+  }),
+)
+
+it.effect("AccountTransactions preserves retryable Akahu read failures as typed RPC errors", () =>
+  Effect.gen(function* () {
+    const error = yield* runWithMockAkahu(
+      Array.from(
+        { length: 6 },
+        () =>
+          ({
+            request: expectedAkahuRequest({ pathname: "/v1/accounts/acc_1/transactions" }),
+            response: { success: false },
+            status: 500,
+          }) satisfies ExpectedAkahuExchange,
+      ),
+      (client) =>
+        client.AccountTransactions({ ...credentials, accountId }).pipe(
+          Stream.runCollect,
+          Effect.map((items) => Array.from(items)),
+        ),
+    ).pipe(Effect.flip)
+
+    expect(error).toBeInstanceOf(AkahuRpcError)
+    expect(error).toMatchObject({ reason: "read", status: 500 })
   }),
 )
 

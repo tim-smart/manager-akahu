@@ -8,7 +8,9 @@ import {
   Transaction,
 } from "@app/domain/Akahu"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import { HttpApiClient } from "effect/unstable/httpapi"
+import { AkahuRpcError } from "@app/domain/rpc"
 
 const paginatedAkahuItems = <A, E, R>(
   fetchPage: (cursor: string | undefined) => Effect.Effect<PaginatedResponse<A>, E, R>,
@@ -33,13 +35,13 @@ export class AkahuCredentials extends Context.Service<
 export class Akahu extends Context.Service<
   Akahu,
   {
-    readonly accounts: Effect.Effect<ReadonlyArray<Account>, never, AkahuCredentials>
+    readonly accounts: Effect.Effect<ReadonlyArray<Account>, AkahuRpcError, AkahuCredentials>
     transactions(options: {
       readonly accountId: AccountId
-    }): Stream.Stream<Transaction, never, AkahuCredentials>
+    }): Stream.Stream<Transaction, AkahuRpcError, AkahuCredentials>
     pendingTransactions(options: {
       readonly accountId: AccountId
-    }): Stream.Stream<PendingTransaction, never, AkahuCredentials>
+    }): Stream.Stream<PendingTransaction, AkahuRpcError, AkahuCredentials>
   }
 >()("server/Akahu") {
   static readonly layer = Layer.effect(
@@ -70,22 +72,41 @@ export class Akahu extends Context.Service<
           akahu.accounts.list({
             query: { cursor },
           }),
-        ).pipe(Stream.runCollect, Effect.orDie),
+        ).pipe(
+          Stream.runCollect,
+          Effect.map((items): ReadonlyArray<Account> => Array.from(items)),
+          Effect.mapError(mapAkahuRpcError),
+        ),
         transactions: ({ accountId }) =>
           paginatedAkahuItems((cursor) =>
             akahu.transactions.list({
               params: { accountId },
               query: { cursor },
             }),
-          ).pipe(Stream.orDie),
+          ).pipe(Stream.mapError(mapAkahuRpcError)),
         pendingTransactions: ({ accountId }) =>
           paginatedAkahuItems((cursor) =>
             akahu.transactions.pending({
               params: { accountId },
               query: { amount_as_number: "true", cursor },
             }),
-          ).pipe(Stream.orDie),
+          ).pipe(Stream.mapError(mapAkahuRpcError)),
       })
     }),
   )
+}
+
+const mapAkahuRpcError = (error: unknown) => {
+  if (HttpClientError.isHttpClientError(error)) {
+    const status = error.response?.status
+    if (status === 401) {
+      return new AkahuRpcError({ reason: "authentication", status })
+    }
+    if (status === 403) {
+      return new AkahuRpcError({ reason: "authorization", status })
+    }
+    return new AkahuRpcError({ reason: "read", ...(status === undefined ? {} : { status }) })
+  }
+
+  return new AkahuRpcError({ reason: "read" })
 }

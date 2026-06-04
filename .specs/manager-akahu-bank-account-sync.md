@@ -116,7 +116,9 @@ The generated Manager API client includes endpoints and fields needed for this f
 
 - `packages/domain/src/Manager/AkahuCustomFields.ts` now models extended linked Manager/Akahu account metadata, stale Manager account selections, and a setup-state discriminated union for loading, missing credentials, invalid credentials, no Akahu accounts, no linked Manager accounts, ready, and general error states.
 - The website setup flow now preserves creation of the two Manager Business Details token custom fields, treats absent or blank token values as the normal `missingCredentials` setup state, and only calls Akahu `ListAccounts` and creates/updates the `Akahu Account` dropdown after both credential values are present.
-- Akahu account listing failures that look like authorization/authentication failures are mapped to `invalidCredentials`; other setup failures map to the retryable `error` state. The returned setup state intentionally excludes credential values so the atom/UI do not receive tokens.
+- Typed Akahu account-listing authentication/authorization failures are mapped to `invalidCredentials`; other typed Akahu read failures map to the retryable `error` state. The returned setup state intentionally excludes credential values so the atom/UI do not receive tokens.
+- Task 3 follow-up replaced setup-flow invalid-credential detection based on `Cause.pretty` and regex matching with the typed `AkahuRpcError` RPC boundary. Akahu HTTP/status/schema read failures now remain in the server/domain error channel; 401 maps to `authentication`, 403 maps to `authorization`, and other Akahu read failures map to retryable `read`.
+- The website setup flow now maps typed Akahu authentication/authorization failures to `invalidCredentials` and typed Akahu read failures to the retryable setup `error` state using normal Effect error handling. The broad setup `catchCause` was removed so defects remain on the atom/runtime error path instead of being collapsed into generic setup states.
 - Linked-account setup discovery now records Manager account `currency` and `canHavePendingTransactions`, and reports Manager bank/cash accounts whose stored `Akahu Account` selection no longer matches a current Akahu account as non-blocking stale selections.
 - The website atom now returns setup state, and `apps/website/src/main.tsx` renders loading/setup/error/ready states, stale warnings, retry buttons for retryable states, and the ready linked-account list without sync controls. Focused website tests cover linked metadata, stale selections, and setup-state classification.
 
@@ -554,6 +556,15 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Rework `makeManagerAkahuSetupState` so impossible combinations are unrepresentable. The helper currently accepts `akahuAccountCount` separately from `linkedAccounts`, so callers can pass contradictory state. Prefer passing the actual Akahu account array plus the selection result, or keep classification local to the setup discovery flow where Akahu accounts, linked accounts, and stale selections are derived together.
 - Move the setup UI out of `apps/website/src/main.tsx` before Task 7 adds sync controls and modal state. Create focused Manager setup components such as `Manager/SetupStateView.tsx`, `SetupMessage`, `StaleSelections`, and `LinkedAccountsList`, and render stale-selection warnings through one shared path for every setup state that carries them.
 - Validation: run focused website tests for setup-state classification, `pnpm --filter website build`, and any affected `@app/domain`/server build or RPC tests after changing typed Akahu errors.
+
+### Task 3 follow-up: Typed Akahu/RPC setup error boundary (completed)
+
+- Replace invalid-credential detection based on `Cause.pretty` and regex matching in `apps/website/src/Manager/Flows.ts` with the typed `AkahuRpcError` RPC boundary. (completed)
+- Preserve Akahu HTTP/read failures in the server/domain error channel instead of erasing them with `Effect.orDie`. (completed)
+- Map 401/403 Akahu account-list failures to the `invalidCredentials` setup state through typed Effect error handling. (completed)
+- Map retryable Akahu read failures to the setup `error` state while leaving defects on the atom/runtime error path. (completed)
+- Add focused website setup-flow tests and server RPC tests for invalid credentials and retryable Akahu read failures. (completed)
+- Validation: `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, `pnpm --filter server build`, and `pnpm --filter website build` pass.
 
 ### Task 4: Pure transaction sync helpers with tests
 
