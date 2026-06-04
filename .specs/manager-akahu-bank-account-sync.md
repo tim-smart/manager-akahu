@@ -566,6 +566,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add focused website setup-flow tests and server RPC tests for invalid credentials and retryable Akahu read failures. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, `pnpm --filter server build`, and `pnpm --filter website build` pass.
 
+### Task 3 follow-up review: Accept typed Akahu/RPC setup error boundary (completed)
+
+- Deep code-quality review found no actionable structural follow-up for the typed Akahu/RPC setup error-boundary implementation. Keep `AkahuRpcError` as the structured RPC failure boundary, keep Akahu HTTP/status/schema read failures in the server/domain error channel, and keep `ManagerFlows` mapping only typed Akahu authentication/authorization/read failures into setup states through normal Effect error handling. (completed)
+- Preserve the current defect boundary: do not reintroduce `Cause.pretty`/regex credential detection, `Effect.orDie` around Akahu reads, or broad `catchCause` handling that would collapse defects into generic setup states. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records focused website setup-flow tests, server Akahu RPC tests, and affected domain/server/website builds passing.
+
 ### Task 4: Pure transaction sync helpers with tests
 
 - Add a pure helper module independent of React, Atom, Manager client, and ApiClient.
