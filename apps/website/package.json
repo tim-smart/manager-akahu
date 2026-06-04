@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
+    "bundle": "vp build",
     "build": "tsc -b tsconfig.json && vp build",
     "preview": "vp preview"
   },
