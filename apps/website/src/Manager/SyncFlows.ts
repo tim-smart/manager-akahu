@@ -141,6 +141,10 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
     return buildManagerAkahuSettledSyncAccountErrorSummary(account, syncReadResult.error)
   }
 
+  const importabilityDecision = getManagerBankAccountCurrencyImportDecision(account)
+  const createdFdxTransactionIds = new Set<string>()
+  let existingSettledOverlapCount = 0
+
   const transactionsResult = yield* input
     .fetchSettledTransactions({
       akahuAppToken: input.tokens.akahuAppToken,
@@ -148,11 +152,87 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
       accountId: account.akahuAccount._id,
     })
     .pipe(
-      Stream.runCollect,
-      Effect.map((transactions) => ({
-        _tag: "transactions" as const,
-        transactions: Array.from(transactions),
-      })),
+      Stream.runForEachWhile((transaction) =>
+        Effect.gen(function* () {
+          counts = incrementManagerAkahuSyncSummaryCount(counts, "settledFetched")
+
+          const duplicateDecision = decideSettledDuplicateByAkahuTransactionId(
+            syncReadResult.syncRead,
+            transaction._id,
+          )
+          if (duplicateDecision._tag === "duplicate") {
+            counts = incrementManagerAkahuSyncSummaryCount(counts, "duplicatesSkipped")
+            existingSettledOverlapCount += 1
+            return existingSettledOverlapCount < 5
+          }
+
+          if (createdFdxTransactionIds.has(transaction._id)) {
+            counts = incrementManagerAkahuSyncSummaryCount(counts, "duplicatesSkipped")
+            return true
+          }
+
+          const classification = classifyManagerAkahuSuspenseImport({
+            bankOrCashAccountKey: account.key,
+            date: transaction.date,
+            signedAmount: transaction.amount,
+            reference: transaction._id,
+            description: getAkahuTransactionDescription(transaction),
+            fdxTransactionId: transaction._id,
+            clearance: { _tag: "settled" },
+            importabilityDecision,
+          })
+
+          switch (classification._tag) {
+            case "receipt": {
+              const writeResult = yield* input.client["POST/api4/receipt"](
+                classification.managerDecision.payload,
+              ).pipe(
+                Effect.as({ _tag: "created" as const }),
+                Effect.catch((error) =>
+                  Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+                ),
+              )
+              if (writeResult._tag === "error") {
+                errors.push(writeResult.error)
+                counts = incrementManagerAkahuSyncSummaryCount(counts, "errors")
+                return true
+              }
+              createdFdxTransactionIds.add(transaction._id)
+              counts = incrementManagerAkahuSyncSummaryCount(counts, "receiptsCreated")
+              return true
+            }
+            case "payment": {
+              const writeResult = yield* input.client["POST/api4/payment"](
+                classification.managerDecision.payload,
+              ).pipe(
+                Effect.as({ _tag: "created" as const }),
+                Effect.catch((error) =>
+                  Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+                ),
+              )
+              if (writeResult._tag === "error") {
+                errors.push(writeResult.error)
+                counts = incrementManagerAkahuSyncSummaryCount(counts, "errors")
+                return true
+              }
+              createdFdxTransactionIds.add(transaction._id)
+              counts = incrementManagerAkahuSyncSummaryCount(counts, "paymentsCreated")
+              return true
+            }
+            case "zero": {
+              counts = incrementManagerAkahuSyncSummaryCount(counts, "zeroAmountSkipped")
+              return true
+            }
+            case "unsupported": {
+              warnings.push(classification.warning)
+              counts = incrementManagerAkahuSyncSummaryCount(counts, "unsupportedSkipped")
+              counts = incrementManagerAkahuSyncSummaryCount(counts, "warnings")
+              return true
+            }
+          }
+        }),
+      ),
+      Effect.as({ _tag: "processed" as const }),
       Effect.catch((error) =>
         Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
       ),
@@ -160,86 +240,6 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
 
   if (transactionsResult._tag === "error") {
     return buildManagerAkahuSettledSyncAccountErrorSummary(account, transactionsResult.error)
-  }
-
-  counts = incrementManagerAkahuSyncSummaryCount(
-    counts,
-    "settledFetched",
-    transactionsResult.transactions.length,
-  )
-
-  const importabilityDecision = getManagerBankAccountCurrencyImportDecision(account)
-  const createdFdxTransactionIds = new Set<string>()
-
-  for (const transaction of transactionsResult.transactions) {
-    const duplicateDecision = decideSettledDuplicateByAkahuTransactionId(
-      syncReadResult.syncRead,
-      transaction._id,
-    )
-    if (duplicateDecision._tag === "duplicate" || createdFdxTransactionIds.has(transaction._id)) {
-      counts = incrementManagerAkahuSyncSummaryCount(counts, "duplicatesSkipped")
-      continue
-    }
-
-    const classification = classifyManagerAkahuSuspenseImport({
-      bankOrCashAccountKey: account.key,
-      date: transaction.date,
-      signedAmount: transaction.amount,
-      reference: transaction._id,
-      description: getAkahuTransactionDescription(transaction),
-      fdxTransactionId: transaction._id,
-      clearance: { _tag: "settled" },
-      importabilityDecision,
-    })
-
-    switch (classification._tag) {
-      case "receipt": {
-        const writeResult = yield* input.client["POST/api4/receipt"](
-          classification.managerDecision.payload,
-        ).pipe(
-          Effect.as({ _tag: "created" as const }),
-          Effect.catch((error) =>
-            Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-          ),
-        )
-        if (writeResult._tag === "error") {
-          errors.push(writeResult.error)
-          counts = incrementManagerAkahuSyncSummaryCount(counts, "errors")
-          continue
-        }
-        createdFdxTransactionIds.add(transaction._id)
-        counts = incrementManagerAkahuSyncSummaryCount(counts, "receiptsCreated")
-        continue
-      }
-      case "payment": {
-        const writeResult = yield* input.client["POST/api4/payment"](
-          classification.managerDecision.payload,
-        ).pipe(
-          Effect.as({ _tag: "created" as const }),
-          Effect.catch((error) =>
-            Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-          ),
-        )
-        if (writeResult._tag === "error") {
-          errors.push(writeResult.error)
-          counts = incrementManagerAkahuSyncSummaryCount(counts, "errors")
-          continue
-        }
-        createdFdxTransactionIds.add(transaction._id)
-        counts = incrementManagerAkahuSyncSummaryCount(counts, "paymentsCreated")
-        continue
-      }
-      case "zero": {
-        counts = incrementManagerAkahuSyncSummaryCount(counts, "zeroAmountSkipped")
-        continue
-      }
-      case "unsupported": {
-        warnings.push(classification.warning)
-        counts = incrementManagerAkahuSyncSummaryCount(counts, "unsupportedSkipped")
-        counts = incrementManagerAkahuSyncSummaryCount(counts, "warnings")
-        continue
-      }
-    }
   }
 
   return {

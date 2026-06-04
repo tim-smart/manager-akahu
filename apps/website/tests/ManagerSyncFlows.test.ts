@@ -89,6 +89,13 @@ const paymentItem = (key: string, fdxTransactionId: string): ItemOfPayment => ({
   _actions: null,
 })
 
+const existingReceiptItems = (
+  fdxTransactionIds: ReadonlyArray<string>,
+): ReadonlyArray<ItemOfReceipt> =>
+  fdxTransactionIds.map((fdxTransactionId, index) =>
+    receiptItem(`receipt-existing-${index + 1}`, fdxTransactionId),
+  )
+
 const makeMockClient = (
   options: {
     readonly receiptsByAccount?: Readonly<Record<string, ReadonlyArray<ItemOfReceipt>>> | undefined
@@ -230,6 +237,82 @@ it.effect("skips settled transactions whose fdxTransactionId already exists in M
       settledFetched: 2,
       receiptsCreated: 1,
       duplicatesSkipped: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect(
+  "stops settled sync before importing transactions older than the fifth existing overlap",
+  () =>
+    Effect.gen(function* () {
+      const managerAccount = linkedAccount()
+      const existingOverlapIds = [
+        "tx-overlap-1",
+        "tx-overlap-2",
+        "tx-overlap-3",
+        "tx-overlap-4",
+        "tx-overlap-5",
+      ]
+      const { client, receiptPayloads, paymentPayloads } = makeMockClient({
+        receiptsByAccount: {
+          "manager-checking": existingReceiptItems(existingOverlapIds),
+        },
+      })
+
+      const summary = yield* runSettledSync({
+        accounts: [managerAccount],
+        client,
+        transactionsByAccount: {
+          [accountId]: [
+            ...existingOverlapIds.map((id) => settledTransaction({ id, amount: "12.34" })),
+            settledTransaction({ id: "tx-older-new", amount: "4.56" }),
+          ],
+        },
+      })
+
+      expect(receiptPayloads).toEqual([])
+      expect(paymentPayloads).toEqual([])
+      expect(summary.overall).toMatchObject({
+        settledFetched: 5,
+        receiptsCreated: 0,
+        paymentsCreated: 0,
+        duplicatesSkipped: 5,
+        errors: 0,
+      })
+    }),
+)
+
+it.effect("continues settled sync past fewer than five overlaps", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount()
+    const existingOverlapIds = ["tx-overlap-1", "tx-overlap-2", "tx-overlap-3", "tx-overlap-4"]
+    const { client, receiptPayloads, paymentPayloads } = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": existingReceiptItems(existingOverlapIds),
+      },
+    })
+
+    const summary = yield* runSettledSync({
+      accounts: [managerAccount],
+      client,
+      transactionsByAccount: {
+        [accountId]: [
+          ...existingOverlapIds.map((id) => settledTransaction({ id, amount: "12.34" })),
+          settledTransaction({ id: "tx-older-new", amount: "4.56" }),
+        ],
+      },
+    })
+
+    expect(receiptPayloads.map((payload) => payload.value.fdxTransactionId)).toEqual([
+      "tx-older-new",
+    ])
+    expect(paymentPayloads).toEqual([])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 5,
+      receiptsCreated: 1,
+      paymentsCreated: 0,
+      duplicatesSkipped: 4,
       errors: 0,
     })
   }),
