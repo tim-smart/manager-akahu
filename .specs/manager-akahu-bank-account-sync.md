@@ -462,6 +462,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - If a real production caller needs configurable page sizes, model the boundary explicitly instead of throwing a raw `RangeError` inside `Effect.gen`. Add a small typed Manager pagination input error, return it in the Effect error channel, and update tests to assert the typed failure. Invalid public input should not escape as an untyped defect that future sync orchestration cannot report through normal Effect error handling. (not needed; there is no public page-size input after this review)
 - Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
 
+### Task 2 follow-up review follow-up: Compress Manager pagination test fixtures
+
+- Keep the production page-size simplification, but refactor `packages/manager-api/tests/ManagerBatchPagination.test.ts` so default-size multi-page coverage does not leave every test hand-writing `managerBatchReadDefaultPageSize` arithmetic, repeated request literals, and large fixture setup inline.
+- Prefer a small local fixture/assertion layer, such as shared receipt/payment page builders and an `expectBatchRequests` helper, that lets each test describe the behavior under review: full first page, duplicate beyond the first page, short or empty terminal page, and expected skip sequence.
+- Preserve coverage that the public read input has no page-size override and that all Manager requests use `managerBatchReadDefaultPageSize`; the goal is to delete test noise, not reintroduce a test-only production knob or weaken pagination assertions.
+- Validation: `pnpm --filter @app/manager-api test` and `pnpm --filter @app/manager-api build` pass.
+
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary
 
 - Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly.
