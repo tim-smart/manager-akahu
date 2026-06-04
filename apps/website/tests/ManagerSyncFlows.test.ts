@@ -187,6 +187,8 @@ const makeMockClient = (
   options: {
     readonly receiptsByAccount?: Readonly<Record<string, ReadonlyArray<ItemOfReceipt>>> | undefined
     readonly paymentsByAccount?: Readonly<Record<string, ReadonlyArray<ItemOfPayment>>> | undefined
+    readonly receiptPutError?: Error | undefined
+    readonly paymentPutError?: Error | undefined
   } = {},
 ) => {
   const receiptPayloads: Array<ManagerSuspenseReceiptPayload> = []
@@ -250,6 +252,11 @@ const makeMockClient = (
     },
     "PUT/api4/receipt": (payload) => {
       receiptPutPayloads.push(payload)
+      if (options.receiptPutError !== undefined) {
+        return Effect.fail(options.receiptPutError) as unknown as ReturnType<
+          ManagerAkahuTransactionSyncManagerClient["PUT/api4/receipt"]
+        >
+      }
       for (const receipts of Object.values(receiptsByAccount)) {
         const index = receipts.findIndex((receipt) => receipt.key === payload.key)
         if (index >= 0 && payload.value !== undefined) {
@@ -260,6 +267,11 @@ const makeMockClient = (
     },
     "PUT/api4/payment": (payload) => {
       paymentPutPayloads.push(payload)
+      if (options.paymentPutError !== undefined) {
+        return Effect.fail(options.paymentPutError) as unknown as ReturnType<
+          ManagerAkahuTransactionSyncManagerClient["PUT/api4/payment"]
+        >
+      }
       for (const payments of Object.values(paymentsByAccount)) {
         const index = payments.findIndex((payment) => payment.key === payload.key)
         if (index >= 0 && payload.value !== undefined) {
@@ -866,6 +878,47 @@ it.effect("does not repeat an exact pending update for duplicate pending rows", 
 )
 
 it.effect(
+  "records exact pending update PUT failures without marking the fingerprint processed",
+  () =>
+    Effect.gen(function* () {
+      const managerAccount = linkedAccount({ canHavePendingTransactions: true })
+      const fingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:4.00:retry coffee"
+      const { client, receiptPutPayloads } = makeMockClient({
+        receiptsByAccount: {
+          "manager-checking": [receiptItem("receipt-existing-pending", fingerprint)],
+        },
+        receiptPutError: new Error("Manager receipt PUT failed"),
+      })
+
+      const summary = yield* runTransactionSync({
+        accounts: [managerAccount],
+        client,
+        pendingTransactionsByAccount: {
+          [accountId]: [
+            pendingTransaction({ amount: "4.00", description: "Retry Coffee" }),
+            pendingTransaction({ amount: "4.00", description: "Retry Coffee" }),
+          ],
+        },
+      })
+
+      expect(receiptPutPayloads.map((payload) => payload.key)).toEqual([
+        "receipt-existing-pending",
+        "receipt-existing-pending",
+      ])
+      expect(summary.accounts[0]?.errors).toEqual([
+        "Manager receipt PUT failed",
+        "Manager receipt PUT failed",
+      ])
+      expect(summary.overall).toMatchObject({
+        pendingFetched: 2,
+        pendingUpdated: 0,
+        duplicatesSkipped: 0,
+        errors: 2,
+      })
+    }),
+)
+
+it.effect(
   "replaces exactly one safe pending receipt or payment with canonical settled updates",
   () =>
     Effect.gen(function* () {
@@ -1030,6 +1083,60 @@ it.effect("does not reuse a pending-to-settled replacement candidate in the same
       duplicatesSkipped: 0,
       warnings: 0,
       errors: 0,
+    })
+  }),
+)
+
+it.effect("records pending-to-settled PUT failures without marking IDs processed", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount()
+    const { client, receiptPayloads, receiptPutPayloads } = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [
+          pendingReceiptItem("receipt-existing-pending", {
+            date: "2026-06-05",
+            amount: "12.34",
+            description: "Coffee Shop",
+          }),
+        ],
+      },
+      receiptPutError: new Error("Manager receipt replacement PUT failed"),
+    })
+
+    const summary = yield* runTransactionSync({
+      accounts: [managerAccount],
+      client,
+      transactionsByAccount: {
+        [accountId]: [
+          settledTransaction({
+            id: "tx-settled-retry",
+            amount: "12.34",
+            merchantName: "Coffee Shop",
+          }),
+          settledTransaction({
+            id: "tx-settled-retry",
+            amount: "12.34",
+            merchantName: "Coffee Shop",
+          }),
+        ],
+      },
+    })
+
+    expect(receiptPutPayloads.map((payload) => payload.key)).toEqual([
+      "receipt-existing-pending",
+      "receipt-existing-pending",
+    ])
+    expect(receiptPayloads).toEqual([])
+    expect(summary.accounts[0]?.errors).toEqual([
+      "Manager receipt replacement PUT failed",
+      "Manager receipt replacement PUT failed",
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 2,
+      receiptsCreated: 0,
+      pendingSettled: 0,
+      duplicatesSkipped: 0,
+      errors: 2,
     })
   }),
 )

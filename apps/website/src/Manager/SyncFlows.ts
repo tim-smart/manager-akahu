@@ -367,12 +367,17 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
           })
 
           if (pendingReplacementDecision._tag === "match") {
-            accountState = yield* updateManagerAkahuSettledPendingReplacement({
+            accountState = yield* updateManagerAkahuAccountStateFromClassifiedUpdate({
               state: state.accountState,
               client,
-              fdxTransactionId: transaction._id,
               classification,
               entry: pendingReplacementDecision.entry,
+              kindMismatchWarning: `Existing pending Manager entry ${pendingReplacementDecision.entry.key} has a different transaction type than the settled Akahu transaction.`,
+              processedFdxTransactionIds: [
+                pendingReplacementDecision.entry.fdxTransactionId,
+                transaction._id,
+              ],
+              successCount: "pendingSettled",
             })
             return continueManagerAkahuSettledPhase({ ...state, accountState })
           }
@@ -527,12 +532,14 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
               classification,
               successCounts: ["pendingCreated"],
             })
-          : yield* updateManagerAkahuPendingTransaction({
+          : yield* updateManagerAkahuAccountStateFromClassifiedUpdate({
               state,
               client,
-              fdxTransactionId: fingerprintDecision.fingerprint,
               classification,
               entry: exactFingerprintDecision.entry,
+              kindMismatchWarning: `Existing pending Manager entry ${exactFingerprintDecision.entry.key} has a different transaction type than its fingerprint.`,
+              processedFdxTransactionIds: [fingerprintDecision.fingerprint],
+              successCount: "pendingUpdated",
             })
       case "zero":
         return incrementManagerAkahuTransactionSyncAccountCount(state, "zeroAmountSkipped")
@@ -544,20 +551,19 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
   },
 )
 
-const updateManagerAkahuSettledPendingReplacement = Effect.fn(
-  "updateManagerAkahuSettledPendingReplacement",
+const updateManagerAkahuAccountStateFromClassifiedUpdate = Effect.fn(
+  "updateManagerAkahuAccountStateFromClassifiedUpdate",
 )(function* (input: {
   readonly state: ManagerAkahuTransactionSyncAccountState
   readonly client: ManagerAkahuTransactionSyncManagerClient
-  readonly fdxTransactionId: string
   readonly classification: ManagerAkahuTransactionCreateClassification
   readonly entry: ManagerBankOrCashAccountSyncRead["existingFdxTransactionIdEntries"][number]
+  readonly kindMismatchWarning: string
+  readonly processedFdxTransactionIds: ReadonlyArray<string>
+  readonly successCount: keyof ManagerAkahuSyncSummaryCounts
 }) {
   if (input.classification._tag !== input.entry._tag) {
-    let state = addManagerAkahuTransactionSyncAccountWarning(
-      input.state,
-      `Existing pending Manager entry ${input.entry.key} has a different transaction type than the settled Akahu transaction.`,
-    )
+    let state = addManagerAkahuTransactionSyncAccountWarning(input.state, input.kindMismatchWarning)
     state = incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
     return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
   }
@@ -572,51 +578,12 @@ const updateManagerAkahuSettledPendingReplacement = Effect.fn(
     return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
   }
 
-  let state = addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId(
-    input.state,
-    input.entry.fdxTransactionId,
-  )
-  state = addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId(
-    state,
-    input.fdxTransactionId,
-  )
-  return incrementManagerAkahuTransactionSyncAccountCount(state, "pendingSettled")
+  let state = input.state
+  for (const fdxTransactionId of input.processedFdxTransactionIds) {
+    state = addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId(state, fdxTransactionId)
+  }
+  return incrementManagerAkahuTransactionSyncAccountCount(state, input.successCount)
 })
-
-const updateManagerAkahuPendingTransaction = Effect.fn("updateManagerAkahuPendingTransaction")(
-  function* (input: {
-    readonly state: ManagerAkahuTransactionSyncAccountState
-    readonly client: ManagerAkahuTransactionSyncManagerClient
-    readonly fdxTransactionId: string
-    readonly classification: ManagerAkahuTransactionCreateClassification
-    readonly entry: ManagerBankOrCashAccountSyncRead["existingFdxTransactionIdEntries"][number]
-  }) {
-    if (input.classification._tag !== input.entry._tag) {
-      let state = addManagerAkahuTransactionSyncAccountWarning(
-        input.state,
-        `Existing pending Manager entry ${input.entry.key} has a different transaction type than its fingerprint.`,
-      )
-      state = incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
-      return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
-    }
-
-    const writeResult = yield* putManagerAkahuClassifiedUpdate({
-      client: input.client,
-      key: input.entry.key,
-      classification: input.classification,
-    })
-
-    if (writeResult._tag === "error") {
-      return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
-    }
-
-    const state = addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId(
-      input.state,
-      input.fdxTransactionId,
-    )
-    return incrementManagerAkahuTransactionSyncAccountCount(state, "pendingUpdated")
-  },
-)
 
 const putManagerAkahuClassifiedUpdate = Effect.fn("putManagerAkahuClassifiedUpdate")(
   function* (input: {
