@@ -1,4 +1,11 @@
-import { Account, AccountId, ConnectionId, PendingTransaction, UserId } from "@app/domain/Akahu"
+import {
+  Account,
+  AccountId,
+  ConnectionId,
+  PendingTransaction,
+  Transaction,
+  UserId,
+} from "@app/domain/Akahu"
 import { AkahuTokens, LinkedAccount } from "@app/domain/Manager/AkahuCustomFields"
 import type { ItemOfPayment, ItemOfReceipt } from "@app/manager-api/ManagerClient"
 import { BigDecimal, DateTime, Effect, Redacted, Schema, Stream } from "effect"
@@ -36,7 +43,18 @@ const linkedAccount = new LinkedAccount({
   akahuAccount,
 })
 
+const unsupportedForeignCurrencyLinkedAccount = new LinkedAccount({
+  key: "manager-usd-checking",
+  name: "Manager USD Checking",
+  currency: "USD",
+  canHavePendingTransactions: true,
+  akahuAccount,
+})
+
 const zeroPendingFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:0.00:zero coffee"
+const akahuTransactionDate = DateTime.makeUnsafe("2026-06-05T00:00:00.000Z").pipe(
+  DateTime.setZoneNamedUnsafe("Pacific/Auckland"),
+)
 
 const existingZeroPendingReceipt: ItemOfReceipt = {
   key: "receipt-existing-zero-pending",
@@ -57,12 +75,35 @@ const zeroPendingTransaction = new PendingTransaction({
   _account: accountId,
   _user: userId,
   _connection: connectionId,
-  date: DateTime.makeUnsafe("2026-06-05T12:00:00.000Z"),
+  date: akahuTransactionDate,
   description: "Zero Coffee",
   amount: BigDecimal.fromStringUnsafe("0.00"),
 })
 
+const makeSettledTransaction = (id: string, amount: string) =>
+  new Transaction({
+    _id: id,
+    _account: accountId,
+    _user: userId,
+    _connection: connectionId,
+    date: akahuTransactionDate,
+    description: `Settled ${id}`,
+    amount: BigDecimal.fromStringUnsafe(amount),
+  })
+
+const makePendingTransaction = (description: string, amount: string) =>
+  new PendingTransaction({
+    _account: accountId,
+    _user: userId,
+    _connection: connectionId,
+    date: akahuTransactionDate,
+    description,
+    amount: BigDecimal.fromStringUnsafe(amount),
+  })
+
 const makeMockClient = () => {
+  const receiptBatchRequests: Array<unknown> = []
+  const paymentBatchRequests: Array<unknown> = []
   const receiptPayloads: Array<unknown> = []
   const paymentPayloads: Array<unknown> = []
   const receiptPutPayloads: Array<unknown> = []
@@ -70,6 +111,7 @@ const makeMockClient = () => {
 
   const client: ManagerAkahuTransactionSyncManagerClient = {
     "GET/api4/receipt-batch": (params) => {
+      receiptBatchRequests.push(params)
       const bankOrCashAccount = params?.BankOrCashAccount ?? ""
       const skip = params?.Skip ?? 0
       return Effect.succeed({
@@ -81,12 +123,14 @@ const makeMockClient = () => {
             : [],
       })
     },
-    "GET/api4/payment-batch": (_params) =>
-      Effect.succeed({
+    "GET/api4/payment-batch": (params) => {
+      paymentBatchRequests.push(params)
+      return Effect.succeed({
         _links: null,
         _actions: null,
         items: [] as ReadonlyArray<ItemOfPayment>,
-      }),
+      })
+    },
     "POST/api4/receipt": (payload) => {
       receiptPayloads.push(payload)
       return Effect.succeed(true)
@@ -105,7 +149,15 @@ const makeMockClient = () => {
     },
   }
 
-  return { client, receiptPayloads, paymentPayloads, receiptPutPayloads, paymentPutPayloads }
+  return {
+    client,
+    receiptBatchRequests,
+    paymentBatchRequests,
+    receiptPayloads,
+    paymentPayloads,
+    receiptPutPayloads,
+    paymentPutPayloads,
+  }
 }
 
 it.effect("does not report fingerprinted zero-amount pending rows as stale", () =>
@@ -131,6 +183,50 @@ it.effect("does not report fingerprinted zero-amount pending rows as stale", () 
       zeroAmountSkipped: 1,
       stalePendingDetected: 0,
       warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("skips unsupported foreign-currency accounts with one account warning", () =>
+  Effect.gen(function* () {
+    const {
+      client,
+      paymentBatchRequests,
+      paymentPayloads,
+      paymentPutPayloads,
+      receiptBatchRequests,
+      receiptPayloads,
+      receiptPutPayloads,
+    } = makeMockClient()
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [unsupportedForeignCurrencyLinkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction("settled-unsupported-1", "12.34"),
+          makeSettledTransaction("settled-unsupported-2", "-5.67"),
+        ]),
+      fetchPendingTransactions: () =>
+        Stream.fromIterable([makePendingTransaction("Unsupported pending", "8.90")]),
+    })
+
+    expect(receiptBatchRequests).toEqual([])
+    expect(paymentBatchRequests).toEqual([])
+    expect(receiptPayloads).toEqual([])
+    expect(paymentPayloads).toEqual([])
+    expect(receiptPutPayloads).toEqual([])
+    expect(paymentPutPayloads).toEqual([])
+    expect(summary.accounts[0]?.warnings).toEqual([
+      "Skipping Manager USD Checking: foreign-currency Manager imports are not verified yet (USD).",
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 2,
+      pendingFetched: 1,
+      unsupportedSkipped: 3,
+      warnings: 1,
       errors: 0,
     })
   }),

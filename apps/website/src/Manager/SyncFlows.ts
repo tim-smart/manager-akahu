@@ -184,6 +184,15 @@ export const syncManagerAkahuTransactions = Effect.fn("syncManagerAkahuTransacti
 
 const syncManagerAkahuTransactionsForAccount = Effect.fn("syncManagerAkahuTransactionsForAccount")(
   function* (input: SyncManagerAkahuTransactionsInput, account: LinkedAccount) {
+    const importabilityDecision = getManagerBankAccountCurrencyImportDecision(account)
+    if (importabilityDecision._tag === "skip") {
+      return yield* syncManagerAkahuUnsupportedAccount(
+        input,
+        account,
+        importabilityDecision.warning,
+      )
+    }
+
     const syncReadResult = yield* fetchManagerBankOrCashAccountSyncRead(input.client, {
       bankOrCashAccountKey: account.key,
     }).pipe(
@@ -201,7 +210,7 @@ const syncManagerAkahuTransactionsForAccount = Effect.fn("syncManagerAkahuTransa
       account,
       client: input.client,
       syncRead: syncReadResult.syncRead,
-      importabilityDecision: getManagerBankAccountCurrencyImportDecision(account),
+      importabilityDecision,
     }
     let accountState = initialManagerAkahuTransactionSyncAccountState()
 
@@ -223,6 +232,66 @@ const syncManagerAkahuTransactionsForAccount = Effect.fn("syncManagerAkahuTransa
     return buildManagerAkahuTransactionSyncAccountSummaryFromState(account, accountState)
   },
 )
+
+const syncManagerAkahuUnsupportedAccount = Effect.fn("syncManagerAkahuUnsupportedAccount")(
+  function* (input: SyncManagerAkahuTransactionsInput, account: LinkedAccount, warning: string) {
+    let state = initialManagerAkahuTransactionSyncAccountState()
+    state = addManagerAkahuTransactionSyncAccountWarning(state, warning)
+    state = incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+
+    const settledResult = yield* syncManagerAkahuUnsupportedAccountSummaryPhase({
+      state,
+      stream: input.fetchSettledTransactions({
+        akahuAppToken: input.tokens.akahuAppToken,
+        akahuUserToken: input.tokens.akahuUserToken,
+        accountId: account.akahuAccount._id,
+      }),
+      fetchedCount: "settledFetched",
+    })
+    state = settledResult.state
+
+    if (!settledResult.failed && account.canHavePendingTransactions) {
+      state = (yield* syncManagerAkahuUnsupportedAccountSummaryPhase({
+        state,
+        stream: input.fetchPendingTransactions({
+          akahuAppToken: input.tokens.akahuAppToken,
+          akahuUserToken: input.tokens.akahuUserToken,
+          accountId: account.akahuAccount._id,
+        }),
+        fetchedCount: "pendingFetched",
+      })).state
+    }
+
+    return buildManagerAkahuTransactionSyncAccountSummaryFromState(account, state)
+  },
+)
+
+const syncManagerAkahuUnsupportedAccountSummaryPhase = Effect.fn(
+  "syncManagerAkahuUnsupportedAccountSummaryPhase",
+)(function* <A>(input: {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly stream: Stream.Stream<A, unknown>
+  readonly fetchedCount: "settledFetched" | "pendingFetched"
+}) {
+  let state = input.state
+  let failed = false
+
+  yield* input.stream.pipe(
+    Stream.runForEach(() =>
+      Effect.sync(() => {
+        state = incrementManagerAkahuTransactionSyncAccountCount(state, input.fetchedCount)
+        state = incrementManagerAkahuTransactionSyncAccountCount(state, "unsupportedSkipped")
+      }),
+    ),
+    Effect.catch((error) => {
+      failed = true
+      state = addManagerAkahuTransactionSyncAccountError(state, formatSyncError(error))
+      return Effect.void
+    }),
+  )
+
+  return { state, failed } as const
+})
 
 const syncManagerAkahuSettledTransactionPhase = Effect.fn(
   "syncManagerAkahuSettledTransactionPhase",
