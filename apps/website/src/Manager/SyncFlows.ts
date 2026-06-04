@@ -8,6 +8,7 @@ import {
   decideSettledDuplicateByAkahuTransactionId,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
+  type ManagerAkahuSuspenseImportClassification,
   type ManagerAkahuSyncSummaryCounts,
 } from "@app/manager-api/ManagerAkahuTransactionSync"
 import {
@@ -70,19 +71,15 @@ interface ManagerAkahuSettledAccountProcessorState {
   readonly existingSettledOverlapIds: ReadonlySet<string>
 }
 
-type ManagerAkahuSettledAccountProcessorResult =
-  | {
-      readonly _tag: "continue"
-      readonly state: ManagerAkahuSettledAccountProcessorState
-    }
-  | {
-      readonly _tag: "stop"
-      readonly state: ManagerAkahuSettledAccountProcessorState
-      readonly reason: {
-        readonly _tag: "existingOverlapLimitReached"
-        readonly limit: number
-      }
-    }
+interface ManagerAkahuSettledAccountProcessorStep {
+  readonly state: ManagerAkahuSettledAccountProcessorState
+  readonly shouldStop: boolean
+}
+
+type ManagerAkahuSettledCreateClassification = Extract<
+  ManagerAkahuSuspenseImportClassification,
+  { readonly _tag: "receipt" | "payment" }
+>
 
 interface ManagerAkahuSettledAccountProcessorInput {
   readonly account: LinkedAccount
@@ -184,19 +181,18 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
       accountId: account.akahuAccount._id,
     })
     .pipe(
-      Stream.rechunk(1),
-      Stream.runForEachWhile((transaction) =>
+      Stream.takeUntilEffect((transaction) =>
         Effect.gen(function* () {
-          const result = yield* processManagerAkahuSettledTransaction({
+          const step = yield* processManagerAkahuSettledTransaction({
             processor,
             state: processorState,
             transaction,
           })
-          processorState = result.state
-          // With singleton chunks in the pinned Effect runtime, returning true ends the pull loop.
-          return result._tag === "stop"
+          processorState = step.state
+          return step.shouldStop
         }),
       ),
+      Stream.runDrain,
       Effect.catch((error) => {
         processorState = addManagerAkahuSettledAccountProcessorError(
           processorState,
@@ -243,48 +239,14 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
     })
 
     switch (classification._tag) {
-      case "receipt": {
-        const writeResult = yield* client["POST/api4/receipt"](
-          classification.managerDecision.payload,
-        ).pipe(
-          Effect.as({ _tag: "created" as const }),
-          Effect.catch((error) =>
-            Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-          ),
-        )
-        if (writeResult._tag === "error") {
-          return continueManagerAkahuSettledAccountProcessor(
-            addManagerAkahuSettledAccountProcessorError(state, writeResult.error),
-          )
-        }
-        state = addManagerAkahuSettledAccountProcessorCreatedFdxTransactionId(
+      case "receipt":
+      case "payment":
+        return yield* createManagerAkahuSettledTransaction({
           state,
-          transaction._id,
-        )
-        state = incrementManagerAkahuSettledAccountProcessorCount(state, "receiptsCreated")
-        return continueManagerAkahuSettledAccountProcessor(state)
-      }
-      case "payment": {
-        const writeResult = yield* client["POST/api4/payment"](
-          classification.managerDecision.payload,
-        ).pipe(
-          Effect.as({ _tag: "created" as const }),
-          Effect.catch((error) =>
-            Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-          ),
-        )
-        if (writeResult._tag === "error") {
-          return continueManagerAkahuSettledAccountProcessor(
-            addManagerAkahuSettledAccountProcessorError(state, writeResult.error),
-          )
-        }
-        state = addManagerAkahuSettledAccountProcessorCreatedFdxTransactionId(
-          state,
-          transaction._id,
-        )
-        state = incrementManagerAkahuSettledAccountProcessorCount(state, "paymentsCreated")
-        return continueManagerAkahuSettledAccountProcessor(state)
-      }
+          client,
+          transaction,
+          classification,
+        })
       case "zero": {
         state = incrementManagerAkahuSettledAccountProcessorCount(state, "zeroAmountSkipped")
         return continueManagerAkahuSettledAccountProcessor(state)
@@ -296,6 +258,46 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
         return continueManagerAkahuSettledAccountProcessor(state)
       }
     }
+  },
+)
+
+const createManagerAkahuSettledTransaction = Effect.fn("createManagerAkahuSettledTransaction")(
+  function* (input: {
+    readonly state: ManagerAkahuSettledAccountProcessorState
+    readonly client: ManagerAkahuSettledSyncManagerClient
+    readonly transaction: Transaction
+    readonly classification: ManagerAkahuSettledCreateClassification
+  }) {
+    const write =
+      input.classification._tag === "receipt"
+        ? {
+            createdCount: "receiptsCreated" as const,
+            effect: input.client["POST/api4/receipt"](input.classification.managerDecision.payload),
+          }
+        : {
+            createdCount: "paymentsCreated" as const,
+            effect: input.client["POST/api4/payment"](input.classification.managerDecision.payload),
+          }
+
+    const writeResult = yield* write.effect.pipe(
+      Effect.as({ _tag: "created" as const }),
+      Effect.catch((error) =>
+        Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+      ),
+    )
+
+    if (writeResult._tag === "error") {
+      return continueManagerAkahuSettledAccountProcessor(
+        addManagerAkahuSettledAccountProcessorError(input.state, writeResult.error),
+      )
+    }
+
+    let state = addManagerAkahuSettledAccountProcessorCreatedFdxTransactionId(
+      input.state,
+      input.transaction._id,
+    )
+    state = incrementManagerAkahuSettledAccountProcessorCount(state, write.createdCount)
+    return continueManagerAkahuSettledAccountProcessor(state)
   },
 )
 
@@ -351,23 +353,16 @@ const addManagerAkahuSettledAccountProcessorExistingOverlap = (
 
 const buildManagerAkahuSettledAccountProcessorResult = (
   state: ManagerAkahuSettledAccountProcessorState,
-): ManagerAkahuSettledAccountProcessorResult =>
-  state.existingSettledOverlapIds.size >= managerAkahuSettledExistingOverlapLimit
-    ? {
-        _tag: "stop",
-        state,
-        reason: {
-          _tag: "existingOverlapLimitReached",
-          limit: managerAkahuSettledExistingOverlapLimit,
-        },
-      }
-    : continueManagerAkahuSettledAccountProcessor(state)
+): ManagerAkahuSettledAccountProcessorStep => ({
+  state,
+  shouldStop: state.existingSettledOverlapIds.size >= managerAkahuSettledExistingOverlapLimit,
+})
 
 const continueManagerAkahuSettledAccountProcessor = (
   state: ManagerAkahuSettledAccountProcessorState,
-): ManagerAkahuSettledAccountProcessorResult => ({
-  _tag: "continue",
+): ManagerAkahuSettledAccountProcessorStep => ({
   state,
+  shouldStop: false,
 })
 
 const buildManagerAkahuSettledSyncAccountSummaryFromProcessorState = (
