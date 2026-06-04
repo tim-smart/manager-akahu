@@ -1,8 +1,6 @@
 Perform a deep code quality audit of the current task (task details below).
 
-Avoid reviewing the same task multiple times. If a task has already had a round
-of feedback, try not to review it again unless something significant needs to be
-changed.
+**AVOID REVIEWING THE SAME TASK MULTIPLE TIMES**. If a task has already had a round of feedback, try not to review it again.
 
 Rethink how to structure / implement the changes to meaningfully improve code quality without impacting behavior.
 Work to improve abstractions, modularity, reduce Spaghetti code, improve succinctness and legibility.
