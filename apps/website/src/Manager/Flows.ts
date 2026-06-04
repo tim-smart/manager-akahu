@@ -1,16 +1,37 @@
 import { Manager } from "@/Manager"
-import { Array, Cause, Context, Effect, Layer, Resource, Schema } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Option, Resource, Schema } from "effect"
 import {
-  AkahuCustomFields,
   AkahuTokens,
+  type AkahuCredentialFieldName,
   LinkedAccount,
+  makeManagerAkahuSetupState,
+  ManagerAkahuSetupError,
+  ManagerAkahuSetupInvalidCredentials,
+  ManagerAkahuSetupMissingCredentials,
+  type ManagerAkahuSetupState,
+  StaleLinkedAccountSelection,
 } from "@app/domain/Manager/AkahuCustomFields"
 import { ApiClient } from "@/ApiClient"
+import type { Account } from "@app/domain/Akahu"
+
+type ManagerAkahuAccountRecord = {
+  readonly key: string
+  readonly item: {
+    readonly name?: string | null | undefined
+    readonly currency?: string | null | undefined
+    readonly canHavePendingTransactions?: boolean | undefined
+    readonly customFields2?:
+      | {
+          readonly strings?: Record<string, unknown> | null | undefined
+        }
+      | undefined
+  }
+}
 
 export class ManagerFlows extends Context.Service<
   ManagerFlows,
   {
-    readonly getAkahuFields: Effect.Effect<AkahuCustomFields, Cause.NoSuchElementError>
+    readonly getAkahuSetupState: Effect.Effect<ManagerAkahuSetupState>
   }
 >()("ManagerFlows") {
   static readonly layer = Layer.effect(
@@ -97,18 +118,47 @@ export class ManagerFlows extends Context.Service<
         return current.find((field) => field.item.name === name)!
       })
 
-      const getAkahuFields = Effect.gen(function* () {
+      const getAkahuSetupState = Effect.gen(function* () {
         const fields = yield* ensureCustomFields
         const business = yield* client["GET/api4/business-details"]()
         const input = business.customFields2?.strings ?? {}
-        const tokens = yield* Effect.fromOption(
-          Schema.decodeOption(AkahuTokens)({
-            akahuAppToken: input[fields.akahuAppToken.key] as string,
-            akahuUserToken: input[fields.akahuUserToken.key] as string,
-          }),
-        )
+        const akahuAppTokenValue = getCredentialValue(input[fields.akahuAppToken.key])
+        const akahuUserTokenValue = getCredentialValue(input[fields.akahuUserToken.key])
+        const missingFieldNames: Array<AkahuCredentialFieldName> = []
 
-        const accounts = yield* api("ListAccounts", tokens).pipe(Effect.orDie)
+        if (akahuAppTokenValue === undefined) {
+          missingFieldNames.push("Akahu App Token")
+        }
+        if (akahuUserTokenValue === undefined) {
+          missingFieldNames.push("Akahu User Token")
+        }
+
+        if (akahuAppTokenValue === undefined || akahuUserTokenValue === undefined) {
+          return new ManagerAkahuSetupMissingCredentials({ missingFieldNames })
+        }
+
+        const tokensOption = Schema.decodeOption(AkahuTokens)({
+          akahuAppToken: akahuAppTokenValue,
+          akahuUserToken: akahuUserTokenValue,
+        })
+        if (Option.isNone(tokensOption)) {
+          return new ManagerAkahuSetupMissingCredentials({ missingFieldNames })
+        }
+        const tokens = tokensOption.value
+
+        const accountsExit = yield* Effect.exit(api("ListAccounts", tokens))
+        if (Exit.isFailure(accountsExit)) {
+          if (isCredentialFailure(accountsExit.cause)) {
+            return new ManagerAkahuSetupInvalidCredentials()
+          }
+
+          return new ManagerAkahuSetupError({
+            message:
+              "Akahu accounts could not be loaded. Check the Akahu connection and try again.",
+          })
+        }
+
+        const accounts = accountsExit.value
         const accountField = yield* ensureAccountField({
           name: "Akahu Account",
           options: accounts.map((account) => ({
@@ -118,38 +168,87 @@ export class ManagerFlows extends Context.Service<
         })
 
         const managerAccounts = (yield* client["GET/api4/bank-or-cash-account-batch"]()).items ?? []
-        const linkedAccounts = Array.empty<LinkedAccount>()
-
-        for (const { item: account, key } of managerAccounts) {
-          const fields = account.customFields2?.strings ?? {}
-          const akahuAccountId = fields[accountField.key] as string
-          if (!akahuAccountId) continue
-
-          const decoded = decodeMultipleValue(akahuAccountId)
-          const akahuAccount = accounts.find((account) => account._id === decoded.value)
-          if (!akahuAccount) continue
-
-          linkedAccounts.push(
-            new LinkedAccount({
-              key,
-              name: account.name ?? "",
-              akahuAccount,
-            }),
-          )
-        }
-
-        return new AkahuCustomFields({
-          akahuAppToken: tokens.akahuAppToken,
-          akahuUserToken: tokens.akahuUserToken,
-          accounts: linkedAccounts,
+        const selections = collectManagerAkahuAccountSelections({
+          managerAccounts,
+          accountFieldKey: accountField.key,
+          akahuAccounts: accounts,
         })
-      }).pipe(Effect.catchTag(["ErrorResponse", "HttpClientError"], Effect.die))
+
+        return makeManagerAkahuSetupState({
+          akahuAccountCount: accounts.length,
+          linkedAccounts: selections.linkedAccounts,
+          staleSelections: selections.staleSelections,
+        })
+      }).pipe(
+        Effect.catchCause(() =>
+          Effect.succeed(
+            new ManagerAkahuSetupError({
+              message:
+                "Manager setup information could not be loaded. Try again after checking Manager is available.",
+            }),
+          ),
+        ),
+      )
 
       return ManagerFlows.of({
-        getAkahuFields,
+        getAkahuSetupState,
       })
     }),
   ).pipe(Layer.provide(Manager.layer))
+}
+
+export const collectManagerAkahuAccountSelections = (options: {
+  readonly managerAccounts: ReadonlyArray<ManagerAkahuAccountRecord>
+  readonly accountFieldKey: string
+  readonly akahuAccounts: ReadonlyArray<Account>
+}) => {
+  const linkedAccounts: Array<LinkedAccount> = []
+  const staleSelections: Array<StaleLinkedAccountSelection> = []
+
+  for (const { item: account, key } of options.managerAccounts) {
+    const fields = account.customFields2?.strings ?? {}
+    const akahuAccountId = fields[options.accountFieldKey]
+    if (typeof akahuAccountId !== "string" || akahuAccountId.trim() === "") continue
+
+    const decoded = decodeMultipleValue(akahuAccountId)
+    const akahuAccount = options.akahuAccounts.find((account) => account._id === decoded.value)
+    const accountMetadata = {
+      key,
+      name: account.name ?? "",
+      currency: account.currency ?? null,
+      canHavePendingTransactions: account.canHavePendingTransactions === true,
+    } as const
+
+    if (akahuAccount) {
+      linkedAccounts.push(
+        new LinkedAccount({
+          ...accountMetadata,
+          akahuAccount,
+        }),
+      )
+    } else {
+      staleSelections.push(
+        new StaleLinkedAccountSelection({
+          ...accountMetadata,
+          selectedAkahuAccountId: decoded.value,
+          selectedAkahuAccountLabel: decoded.label === decoded.value ? null : decoded.label,
+        }),
+      )
+    }
+  }
+
+  return { linkedAccounts, staleSelections } as const
+}
+
+const getCredentialValue = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed === "" ? undefined : trimmed
+}
+
+const isCredentialFailure = (cause: Cause.Cause<unknown>) => {
+  const error = Cause.pretty(cause)
+  return /\b(401|403|unauthorized|forbidden|expired)\b/i.test(error)
 }
 
 const encodeMultipleValue = (options: { readonly label: string; readonly value: string }) => {

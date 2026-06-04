@@ -112,6 +112,14 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Akahu boundary RPC tests now use an ordered expected request/response table in the mock HTTP client. Each Akahu page request asserts method, path, full query object, and credential headers before returning the associated mocked response, preserving multi-page coverage for accounts, settled transactions, and pending transactions with `amount_as_number=true` on every pending page.
 - Task 2 Akahu RPC composition follow-up removed the unused live `ApiHandlers` export from `apps/server/src/rpc.ts`. `ApiHandlersBase` remains as the neutral mock-Akahu test seam, while `RpcRoute` is the single live route composition that provides `Akahu.layer`.
 
+### Task 3 setup-state findings
+
+- `packages/domain/src/Manager/AkahuCustomFields.ts` now models extended linked Manager/Akahu account metadata, stale Manager account selections, and a setup-state discriminated union for loading, missing credentials, invalid credentials, no Akahu accounts, no linked Manager accounts, ready, and general error states.
+- The website setup flow now preserves creation of the two Manager Business Details token custom fields, treats absent or blank token values as the normal `missingCredentials` setup state, and only calls Akahu `ListAccounts` and creates/updates the `Akahu Account` dropdown after both credential values are present.
+- Akahu account listing failures that look like authorization/authentication failures are mapped to `invalidCredentials`; other setup failures map to the retryable `error` state. The returned setup state intentionally excludes credential values so the atom/UI do not receive tokens.
+- Linked-account setup discovery now records Manager account `currency` and `canHavePendingTransactions`, and reports Manager bank/cash accounts whose stored `Akahu Account` selection no longer matches a current Akahu account as non-blocking stale selections.
+- The website atom now returns setup state, and `apps/website/src/main.tsx` renders loading/setup/error/ready states, stale warnings, retry buttons for retryable states, and the ready linked-account list without sync controls. Focused website tests cover linked metadata, stale selections, and setup-state classification.
+
 ## Requirements
 
 ### Setup-state UI
@@ -525,17 +533,17 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Do not reintroduce a second live handler export, negative/test-only production naming, or an HTTP-client-specific Akahu helper in later RPC work. (completed)
 - Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` passing.
 
-### Task 3: Setup-state flow, atom, and minimal setup UI
+### Task 3: Setup-state flow, atom, and minimal setup UI (completed)
 
-- Add extended LinkedAccount metadata including canHavePendingTransactions and currency.
-- Add setup-state discriminated union.
-- Replace or wrap getAkahuFields with a setup-state flow that does not throw for normal missing credentials.
-- Preserve custom-field creation behaviour.
-- Only call Akahu ListAccounts and create/update the Akahu Account dropdown when credentials are present.
-- Distinguish missing credentials, invalid credentials, no Akahu accounts, no linked Manager accounts, ready, stale selections, and general errors.
-- Update atoms and consuming UI in the same task so typechecking never sees mismatched return types.
-- Render loading, all setup messages, ready linked-account list without sync controls, stale warnings, and retryable errors.
-- Validation: website/domain build and related tests pass.
+- Add extended LinkedAccount metadata including canHavePendingTransactions and currency. (completed)
+- Add setup-state discriminated union. (completed)
+- Replace or wrap getAkahuFields with a setup-state flow that does not throw for normal missing credentials. (completed)
+- Preserve custom-field creation behaviour. (completed)
+- Only call Akahu ListAccounts and create/update the Akahu Account dropdown when credentials are present. (completed)
+- Distinguish missing credentials, invalid credentials, no Akahu accounts, no linked Manager accounts, ready, stale selections, and general errors. (completed)
+- Update atoms and consuming UI in the same task so typechecking never sees mismatched return types. (completed)
+- Render loading, all setup messages, ready linked-account list without sync controls, stale warnings, and retryable errors. (completed)
+- Validation: `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm --filter @app/domain build`, `pnpm --filter website build`, and `pnpm ready` pass.
 
 ### Task 4: Pure transaction sync helpers with tests
 

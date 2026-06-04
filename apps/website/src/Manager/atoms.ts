@@ -7,9 +7,9 @@ const runtime = Atom.runtime((get) =>
   ManagerFlows.layer.pipe(Layer.provide(get(ApiClient.runtime.layer))),
 )
 
-export const akakuFieldsAtom = runtime.atom(
+export const akahuSetupStateAtom = runtime.atom(
   Effect.fnUntraced(function* () {
     const flows = yield* ManagerFlows
-    return yield* flows.getAkahuFields
+    return yield* flows.getAkahuSetupState
   }),
 )
