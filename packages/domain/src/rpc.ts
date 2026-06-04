@@ -17,7 +17,8 @@ export class AccountTransactions extends Rpc.make("AccountTransactions", {
     akahuUserToken: Schema.Redacted(Schema.String),
     accountId: AccountId,
   },
-  success: Schema.Array(Transaction),
+  success: Transaction,
+  stream: true,
 }) {}
 
 export class AccountPendingTransactions extends Rpc.make("AccountPendingTransactions", {
@@ -26,7 +27,8 @@ export class AccountPendingTransactions extends Rpc.make("AccountPendingTransact
     akahuUserToken: Schema.Redacted(Schema.String),
     accountId: AccountId,
   },
-  success: Schema.Array(PendingTransaction),
+  success: PendingTransaction,
+  stream: true,
 }) {}
 
 export const ApiRpcs = RpcGroup.make(ListAccounts, AccountTransactions, AccountPendingTransactions)

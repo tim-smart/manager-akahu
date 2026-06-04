@@ -1,4 +1,4 @@
-import { Context, DateTime, Effect, Layer, Redacted } from "effect"
+import { Context, Effect, Layer, Option, Redacted, Stream } from "effect"
 import { Account, AccountId, AkahuApi, PendingTransaction, Transaction } from "@app/domain/Akahu"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
@@ -12,17 +12,16 @@ export class AkahuCredentials extends Context.Service<
   }
 >()("server/AkahuCredentials") {}
 
-// @effect-diagnostics-next-line leakingRequirements:off
 export class Akahu extends Context.Service<
   Akahu,
   {
     readonly accounts: Effect.Effect<ReadonlyArray<Account>, never, AkahuCredentials>
     transactions(options: {
       readonly accountId: AccountId
-    }): Effect.Effect<ReadonlyArray<Transaction>, never, AkahuCredentials>
+    }): Stream.Stream<Transaction, never, AkahuCredentials>
     pendingTransactions(options: {
       readonly accountId: AccountId
-    }): Effect.Effect<ReadonlyArray<PendingTransaction>, never, AkahuCredentials>
+    }): Stream.Stream<PendingTransaction, never, AkahuCredentials>
   }
 >()("server/Akahu") {
   static readonly layer = Layer.effect(
@@ -48,8 +47,6 @@ export class Akahu extends Context.Service<
         httpClient,
       })
 
-      const start = (yield* DateTime.now).pipe(DateTime.subtract({ days: 30 }))
-
       return Akahu.of({
         accounts: akahu.accounts
           .list({
@@ -60,25 +57,33 @@ export class Akahu extends Context.Service<
             Effect.orDie,
           ),
         transactions: ({ accountId }) =>
-          akahu.transactions
-            .list({
-              params: { accountId },
-              query: { start },
-            })
-            .pipe(
-              Effect.map((r) => r.items),
-              Effect.orDie,
-            ),
+          Stream.paginate(undefined as string | undefined, (cursor) =>
+            akahu.transactions
+              .list({
+                params: { accountId },
+                query: { cursor },
+              })
+              .pipe(
+                Effect.map((response) => [
+                  response.items,
+                  Option.fromUndefinedOr(response.cursor?.next ?? undefined),
+                ]),
+              ),
+          ).pipe(Stream.orDie),
         pendingTransactions: ({ accountId }) =>
-          akahu.transactions
-            .pending({
-              params: { accountId },
-              query: { start, amount_as_number: "true" },
-            })
-            .pipe(
-              Effect.map((r) => r.items),
-              Effect.orDie,
-            ),
+          Stream.paginate(undefined as string | undefined, (cursor) =>
+            akahu.transactions
+              .pending({
+                params: { accountId },
+                query: { amount_as_number: "true", cursor },
+              })
+              .pipe(
+                Effect.map((response) => [
+                  response.items,
+                  Option.fromUndefinedOr(response.cursor?.next ?? undefined),
+                ]),
+              ),
+          ).pipe(Stream.orDie),
       })
     }),
   ).pipe(Layer.provide(NodeHttpClient.layerUndici))

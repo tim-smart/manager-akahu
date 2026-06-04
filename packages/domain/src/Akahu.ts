@@ -88,7 +88,6 @@ export const AkahuApi = HttpApi.make("akahu").add(
         accountId: AccountId,
       },
       query: {
-        start: Schema.DateTimeUtcFromString,
         cursor: Schema.optional(Schema.String),
       },
       success: PaginatedResponse(Transaction),
@@ -98,7 +97,6 @@ export const AkahuApi = HttpApi.make("akahu").add(
         accountId: AccountId,
       },
       query: {
-        start: Schema.DateTimeUtcFromString,
         amount_as_number: Schema.Literal("true"),
         cursor: Schema.optional(Schema.String),
       },

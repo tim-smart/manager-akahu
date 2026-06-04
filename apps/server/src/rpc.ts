@@ -1,5 +1,5 @@
 import { ApiRpcs } from "@app/domain/rpc"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc"
 import { Akahu, AkahuCredentials } from "./Akahu.ts"
 
@@ -17,14 +17,14 @@ export const ApiHandlers = ApiRpcs.toLayer(
         ),
       AccountTransactions: ({ akahuAppToken, akahuUserToken, accountId }) =>
         akahu.transactions({ accountId }).pipe(
-          Effect.provideService(AkahuCredentials, {
+          Stream.provideService(AkahuCredentials, {
             appToken: akahuAppToken,
             userToken: akahuUserToken,
           }),
         ),
       AccountPendingTransactions: ({ akahuAppToken, akahuUserToken, accountId }) =>
         akahu.pendingTransactions({ accountId }).pipe(
-          Effect.provideService(AkahuCredentials, {
+          Stream.provideService(AkahuCredentials, {
             appToken: akahuAppToken,
             userToken: akahuUserToken,
           }),
