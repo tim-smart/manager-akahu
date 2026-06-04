@@ -5,6 +5,10 @@ Work to improve abstractions, modularity, reduce Spaghetti code, improve succinc
 Be ambitious, if there is a clear path to improving the implementation that involves restructuring some of the codebase, go for it.
 Be extremely thorough and rigorous. Measure twice, cut once.
 
+Avoid reviewing the same task multiple times. If a task has already had a round
+of feedback, try not to review it again unless something significant needs to be
+changed.
+
 After your review, add the feedback as a follow up task to the specification.
 The follow up task should be added directly after the original task, and should be a new task.
 
