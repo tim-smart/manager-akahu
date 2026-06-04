@@ -1,18 +1,15 @@
 import "./index.css"
 
-import { StrictMode, type ReactNode } from "react"
+import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { akahuSetupStateAtom, akahuTransactionSyncAtom } from "./Manager/atoms"
 import { AsyncResult } from "effect/unstable/reactivity"
-import type {
-  LinkedAccount,
-  ManagerAkahuSetupState,
-  StaleLinkedAccountSelection,
-} from "@app/domain/Manager/AkahuCustomFields"
+import type { LinkedAccount, ManagerAkahuSetupState } from "@app/domain/Manager/AkahuCustomFields"
 import { Button } from "@/components/ui/button"
 import type { ManagerAkahuTransactionSyncSummary } from "./Manager/SyncFlows"
-import { SyncControls, type SyncControlActions } from "./Manager/SyncDialog"
+import { LinkedAccountsSyncSection } from "./Manager/LinkedAccountsSyncSection"
+import { SetupMessage, SetupStack, StaleSelections } from "./Manager/SetupUi"
 import { useManagerAkahuSyncController } from "./Manager/useManagerAkahuSyncController"
 
 function App() {
@@ -32,14 +29,13 @@ function App() {
           onDefect: () => <RetryableError onRetry={refreshSetupState} />,
           onSuccess: ({ value }) =>
             value._tag === "ready" ? (
-              <SyncControls
-                state={syncController.state}
+              <LinkedAccountsSyncSection
+                setupState={value}
+                syncState={syncController.state}
                 onOpen={syncController.open}
                 onCancel={syncController.close}
                 onStart={syncController.start}
-              >
-                {(syncActions) => <ReadySetupState setupState={value} syncActions={syncActions} />}
-              </SyncControls>
+              />
             ) : (
               <SetupStateView setupState={value} onRetry={refreshSetupState} />
             ),
@@ -121,50 +117,6 @@ function SetupStateView(props: {
   }
 }
 
-function ReadySetupState(props: {
-  readonly setupState: Extract<ManagerAkahuSetupState, { readonly _tag: "ready" }>
-  readonly syncActions: SyncControlActions
-}) {
-  return (
-    <SetupStack>
-      <SetupMessage
-        eyebrow="Ready"
-        title="Linked bank accounts"
-        description="These Manager bank/cash accounts are linked to current Akahu accounts and can sync transactions already available from Akahu."
-        action={props.syncActions.syncAllButton(props.setupState.accounts)}
-      />
-      <StaleSelections selections={props.setupState.staleSelections} />
-      <Accounts accounts={props.setupState.accounts} syncActions={props.syncActions} />
-    </SetupStack>
-  )
-}
-
-function SetupStack(props: { readonly children: ReactNode }) {
-  return <div className="flex flex-col gap-6">{props.children}</div>
-}
-
-function SetupMessage(props: {
-  readonly eyebrow: string
-  readonly title: string
-  readonly description: string
-  readonly action?: ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium tracking-[0.24em] text-muted-foreground uppercase">
-          {props.eyebrow}
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{props.title}</h1>
-        <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-          {props.description}
-        </p>
-      </div>
-      {props.action}
-    </div>
-  )
-}
-
 function RetryableError(props: { readonly onRetry: () => void }) {
   return (
     <SetupMessage
@@ -181,78 +133,6 @@ function RetryButton(props: { readonly onRetry: () => void }) {
     <Button type="button" variant="outline" className="w-fit" onClick={props.onRetry}>
       Retry setup check
     </Button>
-  )
-}
-
-function Accounts(props: {
-  readonly accounts: ReadonlyArray<LinkedAccount>
-  readonly syncActions: SyncControlActions
-}) {
-  return (
-    <ul className="grid gap-3 md:grid-cols-2">
-      {props.accounts.map((account) => (
-        <li key={account.key} className="rounded-lg border bg-background p-4">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <h2 className="font-medium">{account.name || "Unnamed Manager account"}</h2>
-              <p className="text-sm text-muted-foreground">{account.akahuAccount.name}</p>
-            </div>
-            <div className="grid gap-2 text-sm sm:grid-cols-2">
-              <AccountMetadata label="Currency" value={account.currency ?? "Base currency"} />
-              <AccountMetadata
-                label="Pending transactions"
-                value={account.canHavePendingTransactions ? "Supported" : "Not supported"}
-              />
-            </div>
-            {props.syncActions.accountSyncButton(account)}
-          </div>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-function AccountMetadata(props: { readonly label: string; readonly value: string }) {
-  return (
-    <div className="rounded-md bg-muted px-3 py-2">
-      <div className="text-[0.7rem] font-medium tracking-[0.16em] text-muted-foreground uppercase">
-        {props.label}
-      </div>
-      <div className="mt-1 text-sm">{props.value}</div>
-    </div>
-  )
-}
-
-function StaleSelections(props: {
-  readonly selections: ReadonlyArray<StaleLinkedAccountSelection>
-}) {
-  if (props.selections.length === 0) return null
-
-  return (
-    <section
-      className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-4"
-      aria-label="Stale Akahu selections"
-    >
-      <div className="flex flex-col gap-1">
-        <h2 className="font-medium">Stale Akahu account selections</h2>
-        <p className="text-sm text-muted-foreground">
-          These Manager bank/cash accounts point to Akahu accounts that are not currently available.
-          Edit each Manager account and choose a current Akahu Account value.
-        </p>
-      </div>
-      <ul className="flex flex-col gap-2">
-        {props.selections.map((selection) => (
-          <li key={selection.key} className="rounded-md border bg-background px-3 py-2 text-sm">
-            <span className="font-medium">{selection.name || "Unnamed Manager account"}</span>
-            <span className="text-muted-foreground">
-              {" "}
-              uses {selection.selectedAkahuAccountLabel ?? "unknown Akahu account"} (
-              {selection.selectedAkahuAccountId})
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react"
+import { useEffect, useRef } from "react"
 import { Dialog } from "radix-ui"
 import type { LinkedAccount } from "@app/domain/Manager/AkahuCustomFields"
 import { Button } from "@/components/ui/button"
@@ -10,159 +10,95 @@ import {
   type ManagerAkahuSyncDialogState,
 } from "./SyncUi"
 
-export type SyncControlActions = {
-  readonly syncAllButton: (accounts: ReadonlyArray<LinkedAccount>) => ReactNode
-  readonly accountSyncButton: (account: LinkedAccount) => ReactNode
-}
-
-export function SyncControls(props: {
-  readonly children: (actions: SyncControlActions) => ReactNode
+export function SyncDialogContent(props: {
   readonly state: ManagerAkahuSyncDialogState
-  readonly onOpen: (accounts: ReadonlyArray<LinkedAccount>) => void
-  readonly onCancel: () => void
   readonly onStart: () => void
 }) {
-  const { children, onCancel, onOpen, onStart, state } = props
+  const { onStart, state } = props
   const contentRef = useRef<HTMLDivElement>(null)
   const initialFocusRef = useRef<HTMLButtonElement>(null)
   const canClose = canCloseManagerAkahuSyncDialog(state)
   const isOpen = state._tag !== "closed"
-  const syncDisabled = state._tag === "running"
 
   useEffect(() => {
     if (!isOpen) return
     focusSyncDialogStateTarget(state, initialFocusRef.current, contentRef.current)
   }, [isOpen, state])
 
+  if (state._tag === "closed") return null
+
   return (
-    <Dialog.Root
-      modal
-      open={isOpen}
-      onOpenChange={(open) => {
-        if (!open && canClose) {
-          onCancel()
-        }
-      }}
-    >
-      {children({
-        syncAllButton: (accounts) => (
-          <SyncDialogTriggerButton
-            accounts={accounts}
-            className="w-fit"
-            disabled={syncDisabled}
-            onSync={onOpen}
-          >
-            Sync all
-          </SyncDialogTriggerButton>
-        ),
-        accountSyncButton: (account) => (
-          <SyncDialogTriggerButton
-            accounts={[account]}
-            variant="outline"
-            disabled={syncDisabled}
-            onSync={onOpen}
-          >
-            Sync {account.name || "unnamed Manager account"}
-          </SyncDialogTriggerButton>
-        ),
-      })}
-      {state._tag === "closed" ? null : (
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-background/80 backdrop-blur-sm" />
-          <Dialog.Content
-            ref={contentRef}
-            tabIndex={-1}
-            className="fixed top-1/2 left-1/2 max-h-[calc(100svh-4rem)] w-[calc(100vw-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-card p-6 shadow-lg outline-none sm:p-8"
-            onEscapeKeyDown={(event) => {
-              if (!canClose) {
-                event.preventDefault()
-              }
-            }}
-            onPointerDownOutside={(event) => {
-              if (!canClose) {
-                event.preventDefault()
-              }
-            }}
-            onOpenAutoFocus={(event) => {
-              event.preventDefault()
-              focusSyncDialogStateTarget(state, initialFocusRef.current, contentRef.current)
-            }}
-            onCloseAutoFocus={(event) => {
-              if (!canClose) {
-                event.preventDefault()
-              }
-            }}
-          >
-            <div className="flex flex-col gap-6">
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium tracking-[0.24em] text-muted-foreground uppercase">
-                  Transaction sync
-                </p>
-                <Dialog.Title className="text-2xl font-semibold tracking-tight">
-                  {syncDialogTitle(state)}
-                </Dialog.Title>
-                <Dialog.Description className="text-sm leading-6 text-muted-foreground">
-                  {syncDialogDescription(state)}
-                </Dialog.Description>
-              </div>
-
-              <SyncAccountList state={state} />
-
-              {state._tag === "confirming" ? <SyncConfirmationDetails /> : null}
-              {state._tag === "running" ? <SyncRunningDetails /> : null}
-              {state._tag === "completed" ? <SyncSummary summary={state.summary} /> : null}
-              {state._tag === "failed" ? <SyncFailure message={state.message} /> : null}
-
-              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Dialog.Close asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={!canClose}
-                    ref={state._tag === "confirming" ? undefined : initialFocusRef}
-                  >
-                    {state._tag === "confirming" ? "Cancel" : "Close"}
-                  </Button>
-                </Dialog.Close>
-                {state._tag === "confirming" ? (
-                  <Button
-                    type="button"
-                    disabled={!canStartManagerAkahuSyncDialog(state)}
-                    onClick={onStart}
-                    ref={initialFocusRef}
-                  >
-                    Start sync
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      )}
-    </Dialog.Root>
-  )
-}
-
-function SyncDialogTriggerButton(props: {
-  readonly accounts: ReadonlyArray<LinkedAccount>
-  readonly children: ReactNode
-  readonly disabled: boolean
-  readonly onSync: (accounts: ReadonlyArray<LinkedAccount>) => void
-  readonly className?: string
-  readonly variant?: "default" | "outline"
-}) {
-  return (
-    <Dialog.Trigger asChild>
-      <Button
-        type="button"
-        variant={props.variant}
-        className={props.className}
-        disabled={props.disabled}
-        onClick={() => props.onSync(props.accounts)}
+    <Dialog.Portal>
+      <Dialog.Overlay className="fixed inset-0 bg-background/80 backdrop-blur-sm" />
+      <Dialog.Content
+        ref={contentRef}
+        tabIndex={-1}
+        className="fixed top-1/2 left-1/2 max-h-[calc(100svh-4rem)] w-[calc(100vw-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-card p-6 shadow-lg outline-none sm:p-8"
+        onEscapeKeyDown={(event) => {
+          if (!canClose) {
+            event.preventDefault()
+          }
+        }}
+        onPointerDownOutside={(event) => {
+          if (!canClose) {
+            event.preventDefault()
+          }
+        }}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          focusSyncDialogStateTarget(state, initialFocusRef.current, contentRef.current)
+        }}
+        onCloseAutoFocus={(event) => {
+          if (!canClose) {
+            event.preventDefault()
+          }
+        }}
       >
-        {props.children}
-      </Button>
-    </Dialog.Trigger>
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium tracking-[0.24em] text-muted-foreground uppercase">
+              Transaction sync
+            </p>
+            <Dialog.Title className="text-2xl font-semibold tracking-tight">
+              {syncDialogTitle(state)}
+            </Dialog.Title>
+            <Dialog.Description className="text-sm leading-6 text-muted-foreground">
+              {syncDialogDescription(state)}
+            </Dialog.Description>
+          </div>
+
+          <SyncAccountList state={state} />
+
+          {state._tag === "confirming" ? <SyncConfirmationDetails /> : null}
+          {state._tag === "running" ? <SyncRunningDetails /> : null}
+          {state._tag === "completed" ? <SyncSummary summary={state.summary} /> : null}
+          {state._tag === "failed" ? <SyncFailure message={state.message} /> : null}
+
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Dialog.Close asChild>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!canClose}
+                ref={state._tag === "confirming" ? undefined : initialFocusRef}
+              >
+                {state._tag === "confirming" ? "Cancel" : "Close"}
+              </Button>
+            </Dialog.Close>
+            {state._tag === "confirming" ? (
+              <Button
+                type="button"
+                disabled={!canStartManagerAkahuSyncDialog(state)}
+                onClick={onStart}
+                ref={initialFocusRef}
+              >
+                Start sync
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </Dialog.Content>
+    </Dialog.Portal>
   )
 }
 
