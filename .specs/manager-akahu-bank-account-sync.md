@@ -442,6 +442,15 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Add tests or mocked coverage for multi-page Akahu and Manager responses. (completed)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass for the Akahu pagination portion. `pnpm --filter @app/manager-api test` covers the Manager pagination helper portion.
 
+### Task 2 follow-up: Consolidate Manager sync read pagination model
+
+- Refactor `ManagerBatchPagination.ts` so receipt and payment readers share one private Manager batch pagination helper. Keep the public API endpoint-specific, but avoid maintaining two copies of the same `Skip`/`PageSize`, item accumulation, and stop-condition loop as more Manager batch reads are added.
+- Add a canonical sync-read helper for a selected Manager bank/cash account that fetches complete receipt and payment pages together and returns the read model later sync code actually needs, such as separate receipt/payment arrays plus a typed existing `fdxTransactionId` index or discriminated existing-entry list. This keeps Task 5 from growing ad-hoc "fetch receipts, fetch payments, merge duplicate ids" orchestration inline.
+- Prefer running the independent receipt and payment reads in parallel inside that canonical helper, while preserving sequential page traversal within each endpoint.
+- Tighten the page-size contract while refactoring. Either keep `pageSize` as an internal/test option or require an explicit positive integer instead of silently normalizing arbitrary invalid numbers in the public input.
+- Update focused tests to cover the shared pager through both receipt and payment paths, the combined sync-read helper, duplicate `fdxTransactionId` values beyond the first page in both resource types, and the expected request sequences.
+- Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` if the repository-level Akahu test import issue has been fixed.
+
 ### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary
 
 - Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly.
