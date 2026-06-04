@@ -9,7 +9,8 @@
     "dev": "vp run --filter website --filter server --parallel --log labeled dev",
     "dev:server": "vp run server#dev",
     "prepare": "vp config && effect-tsgo patch",
-    "test": "vitest"
+    "test": "vitest",
+    "test:website-sync-controller": "vitest apps/website/tests/ManagerAkahuSyncController.test.ts"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

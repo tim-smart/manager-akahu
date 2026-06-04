@@ -1,6 +1,6 @@
 import "./index.css"
 
-import { StrictMode, useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { StrictMode, useEffect, useId, useRef, type ReactNode } from "react"
 import { createRoot } from "react-dom/client"
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { akahuSetupStateAtom, akahuTransactionSyncAtom } from "./Manager/atoms"
@@ -15,15 +15,10 @@ import type { ManagerAkahuTransactionSyncSummary } from "./Manager/SyncFlows"
 import {
   canCloseManagerAkahuSyncDialog,
   canStartManagerAkahuSyncDialog,
-  closeManagerAkahuSyncDialog,
-  completeManagerAkahuSyncDialog,
-  failManagerAkahuSyncDialog,
-  initialManagerAkahuSyncDialogState,
   managerAkahuSyncSummaryRows,
-  openManagerAkahuSyncDialog,
-  startManagerAkahuSyncDialog,
   type ManagerAkahuSyncDialogState,
 } from "./Manager/SyncUi"
+import { useManagerAkahuSyncController } from "./Manager/useManagerAkahuSyncController"
 
 function App() {
   const setupState = useAtomValue(akahuSetupStateAtom)
@@ -31,43 +26,7 @@ function App() {
   const runTransactionSync = useAtomSet(akahuTransactionSyncAtom, { mode: "promise" }) as (input: {
     readonly accounts: ReadonlyArray<LinkedAccount>
   }) => Promise<ManagerAkahuTransactionSyncSummary>
-  const [syncDialog, setSyncDialog] = useState<ManagerAkahuSyncDialogState>(
-    initialManagerAkahuSyncDialogState,
-  )
-  const syncInFlightRef = useRef(false)
-
-  const openSyncDialog = (accounts: ReadonlyArray<LinkedAccount>) => {
-    setSyncDialog((state) => openManagerAkahuSyncDialog(state, accounts))
-  }
-
-  const closeSyncDialog = () => {
-    setSyncDialog((state) => closeManagerAkahuSyncDialog(state))
-  }
-
-  const startSync = () => {
-    if (!canStartManagerAkahuSyncDialog(syncDialog) || syncInFlightRef.current) {
-      return
-    }
-
-    const accounts = syncDialog.accounts
-    syncInFlightRef.current = true
-    setSyncDialog(startManagerAkahuSyncDialog(syncDialog))
-    void runTransactionSync({ accounts }).then(
-      (summary) => {
-        syncInFlightRef.current = false
-        setSyncDialog((state) => completeManagerAkahuSyncDialog(state, summary))
-      },
-      () => {
-        syncInFlightRef.current = false
-        setSyncDialog((state) =>
-          failManagerAkahuSyncDialog(
-            state,
-            "Transaction sync failed before a summary was available. Check the Manager and Akahu connection, then try again.",
-          ),
-        )
-      },
-    )
-  }
+  const syncController = useManagerAkahuSyncController(runTransactionSync)
 
   return (
     <main className="min-h-svh bg-background px-4 py-10 text-foreground sm:px-6 sm:py-16">
@@ -80,13 +39,17 @@ function App() {
             <SetupStateView
               setupState={value}
               onRetry={refreshSetupState}
-              onSync={openSyncDialog}
-              syncDisabled={syncDialog._tag === "running"}
+              onSync={syncController.open}
+              syncDisabled={syncController.isRunning}
             />
           ),
         })}
       </section>
-      <SyncDialog state={syncDialog} onCancel={closeSyncDialog} onStart={startSync} />
+      <SyncDialog
+        state={syncController.state}
+        onCancel={syncController.close}
+        onStart={syncController.start}
+      />
     </main>
   )
 }
