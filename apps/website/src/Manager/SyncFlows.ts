@@ -11,6 +11,7 @@ import {
   decideSettledDuplicateByAkahuTransactionId,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
+  isAkahuPendingFdxTransactionId,
   type ManagerAkahuSuspenseImportClassification,
   type ManagerAkahuSyncSummaryCounts,
 } from "@app/manager-api/ManagerAkahuTransactionSync"
@@ -84,6 +85,7 @@ interface ManagerAkahuTransactionSyncAccountState {
   readonly warnings: ReadonlyArray<string>
   readonly errors: ReadonlyArray<string>
   readonly processedFdxTransactionIds: ReadonlySet<string>
+  readonly currentPendingFdxTransactionIds: ReadonlySet<string>
 }
 
 interface ManagerAkahuSettledPhaseState {
@@ -279,6 +281,7 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
   readonly state: ManagerAkahuTransactionSyncAccountState
 }) {
   let state = input.state
+  let failed = false
 
   yield* input.input
     .fetchPendingTransactions({
@@ -297,10 +300,18 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
         }),
       ),
       Effect.catch((error) => {
+        failed = true
         state = addManagerAkahuTransactionSyncAccountError(state, formatSyncError(error))
         return Effect.void
       }),
     )
+
+  if (!failed) {
+    state = detectManagerAkahuStalePendingEntries({
+      state,
+      syncRead: input.context.syncRead,
+    })
+  }
 
   return state
 })
@@ -495,6 +506,11 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
       return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
     }
 
+    state = addManagerAkahuTransactionSyncAccountCurrentPendingFdxTransactionId(
+      state,
+      fingerprintDecision.fingerprint,
+    )
+
     if (state.processedFdxTransactionIds.has(fingerprintDecision.fingerprint)) {
       return incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
     }
@@ -619,6 +635,7 @@ const initialManagerAkahuTransactionSyncAccountState =
     warnings: [],
     errors: [],
     processedFdxTransactionIds: new Set(),
+    currentPendingFdxTransactionIds: new Set(),
   })
 
 const incrementManagerAkahuTransactionSyncAccountCount = (
@@ -653,6 +670,44 @@ const addManagerAkahuTransactionSyncAccountProcessedFdxTransactionId = (
   ...state,
   processedFdxTransactionIds: new Set(state.processedFdxTransactionIds).add(fdxTransactionId),
 })
+
+const addManagerAkahuTransactionSyncAccountCurrentPendingFdxTransactionId = (
+  state: ManagerAkahuTransactionSyncAccountState,
+  fdxTransactionId: string,
+): ManagerAkahuTransactionSyncAccountState => ({
+  ...state,
+  currentPendingFdxTransactionIds: new Set(state.currentPendingFdxTransactionIds).add(
+    fdxTransactionId,
+  ),
+})
+
+const detectManagerAkahuStalePendingEntries = (input: {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly syncRead: ManagerBankOrCashAccountSyncRead
+}): ManagerAkahuTransactionSyncAccountState => {
+  let state = input.state
+
+  for (const entry of input.syncRead.existingFdxTransactionIdEntries) {
+    if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
+      continue
+    }
+    if (state.currentPendingFdxTransactionIds.has(entry.fdxTransactionId)) {
+      continue
+    }
+    if (state.processedFdxTransactionIds.has(entry.fdxTransactionId)) {
+      continue
+    }
+
+    state = addManagerAkahuTransactionSyncAccountWarning(
+      state,
+      `Stale Akahu pending Manager ${entry._tag} ${entry.key} (${entry.fdxTransactionId}) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.`,
+    )
+    state = incrementManagerAkahuTransactionSyncAccountCount(state, "stalePendingDetected")
+    state = incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+  }
+
+  return state
+}
 
 const addManagerAkahuSettledPhaseExistingOverlap = (
   state: ManagerAkahuSettledPhaseState,

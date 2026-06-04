@@ -791,6 +791,46 @@ it.effect("repeats pending sync without creating duplicate Manager entries", () 
   }),
 )
 
+it.effect("detects stale existing pending entries without modifying them", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount({ canHavePendingTransactions: true })
+    const staleReceiptFingerprint = "akahu-pending:v1:akahu-checking:2026-06-04:12.34:old coffee"
+    const stalePaymentFingerprint = "akahu-pending:v1:akahu-checking:2026-06-04:-7.89:old book"
+    const { client, receiptPayloads, paymentPayloads, receiptPutPayloads, paymentPutPayloads } =
+      makeMockClient({
+        receiptsByAccount: {
+          "manager-checking": [receiptItem("receipt-stale-pending", staleReceiptFingerprint)],
+        },
+        paymentsByAccount: {
+          "manager-checking": [paymentItem("payment-stale-pending", stalePaymentFingerprint)],
+        },
+      })
+
+    const summary = yield* runTransactionSync({
+      accounts: [managerAccount],
+      client,
+      pendingTransactionsByAccount: {
+        [accountId]: [],
+      },
+    })
+
+    expect(receiptPayloads).toEqual([])
+    expect(paymentPayloads).toEqual([])
+    expect(receiptPutPayloads).toEqual([])
+    expect(paymentPutPayloads).toEqual([])
+    expect(summary.accounts[0]?.warnings).toEqual([
+      `Stale Akahu pending Manager receipt receipt-stale-pending (${staleReceiptFingerprint}) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.`,
+      `Stale Akahu pending Manager payment payment-stale-pending (${stalePaymentFingerprint}) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.`,
+    ])
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 0,
+      stalePendingDetected: 2,
+      warnings: 2,
+      errors: 0,
+    })
+  }),
+)
+
 it.effect(
   "updates exact pending receipt and payment matches with canonical replacement payloads",
   () =>
@@ -1137,6 +1177,50 @@ it.effect("does not reuse a pending-to-settled replacement candidate in the same
       receiptsCreated: 1,
       pendingSettled: 1,
       duplicatesSkipped: 0,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("does not report a pending entry replaced by settled sync as stale", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount({ canHavePendingTransactions: true })
+    const existingReceipt = pendingReceiptItem("receipt-replaced-pending", {
+      date: "2026-06-05",
+      amount: "12.34",
+      description: "Coffee Shop",
+    })
+    const { client, receiptPayloads, receiptPutPayloads } = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [existingReceipt],
+      },
+    })
+
+    const summary = yield* runTransactionSync({
+      accounts: [managerAccount],
+      client,
+      transactionsByAccount: {
+        [accountId]: [
+          settledTransaction({
+            id: "tx-settled-coffee",
+            amount: "12.34",
+            merchantName: "Coffee Shop",
+          }),
+        ],
+      },
+      pendingTransactionsByAccount: {
+        [accountId]: [],
+      },
+    })
+
+    expect(receiptPutPayloads.map((payload) => payload.key)).toEqual(["receipt-replaced-pending"])
+    expect(receiptPayloads).toEqual([])
+    expect(summary.accounts[0]?.warnings).toEqual([])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      pendingSettled: 1,
+      stalePendingDetected: 0,
       warnings: 0,
       errors: 0,
     })
