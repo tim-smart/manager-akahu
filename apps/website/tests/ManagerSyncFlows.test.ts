@@ -139,14 +139,18 @@ const makeMockClient = (
 const runSettledSync = (options: {
   readonly accounts: ReadonlyArray<LinkedAccount>
   readonly client: ManagerAkahuSettledSyncManagerClient
-  readonly transactionsByAccount: Readonly<Record<string, ReadonlyArray<Transaction>>>
+  readonly transactionsByAccount?: Readonly<Record<string, ReadonlyArray<Transaction>>> | undefined
+  readonly fetchSettledTransactions?:
+    | ((request: { readonly accountId: AccountId }) => Stream.Stream<Transaction, unknown>)
+    | undefined
 }) =>
   syncManagerAkahuSettledTransactions({
     accounts: options.accounts,
     client: options.client,
     tokens,
     fetchSettledTransactions: (request) =>
-      Stream.fromIterable(options.transactionsByAccount[request.accountId] ?? []),
+      options.fetchSettledTransactions?.(request) ??
+      Stream.fromIterable(options.transactionsByAccount?.[request.accountId] ?? []),
   })
 
 it.effect(
@@ -313,6 +317,81 @@ it.effect("continues settled sync past fewer than five overlaps", () =>
       receiptsCreated: 1,
       paymentsCreated: 0,
       duplicatesSkipped: 4,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect(
+  "preserves partial settled summary when the Akahu stream fails after processing a transaction",
+  () =>
+    Effect.gen(function* () {
+      const managerAccount = linkedAccount()
+      const { client, receiptPayloads, paymentPayloads } = makeMockClient()
+
+      const summary = yield* runSettledSync({
+        accounts: [managerAccount],
+        client,
+        fetchSettledTransactions: () =>
+          Stream.fromIterable([
+            settledTransaction({ id: "tx-created", amount: "4.56" }),
+            settledTransaction({ id: "tx-stream-failure", amount: "7.89" }),
+          ]).pipe(
+            Stream.mapEffect((transaction) =>
+              transaction._id === "tx-stream-failure"
+                ? Effect.fail(new Error("Akahu settled stream failed"))
+                : Effect.succeed(transaction),
+            ),
+          ),
+      })
+
+      expect(receiptPayloads.map((payload) => payload.value.fdxTransactionId)).toEqual([
+        "tx-created",
+      ])
+      expect(paymentPayloads).toEqual([])
+      expect(summary.accounts[0]?.errors).toEqual(["Akahu settled stream failed"])
+      expect(summary.overall).toMatchObject({
+        settledFetched: 1,
+        receiptsCreated: 1,
+        duplicatesSkipped: 0,
+        errors: 1,
+      })
+    }),
+)
+
+it.effect("does not count repeated existing settled IDs as multiple overlap slots", () =>
+  Effect.gen(function* () {
+    const managerAccount = linkedAccount()
+    const repeatedExistingId = "tx-overlap-repeated"
+    const { client, receiptPayloads, paymentPayloads } = makeMockClient({
+      receiptsByAccount: {
+        "manager-checking": [receiptItem("receipt-existing", repeatedExistingId)],
+      },
+    })
+
+    const summary = yield* runSettledSync({
+      accounts: [managerAccount],
+      client,
+      transactionsByAccount: {
+        [accountId]: [
+          settledTransaction({ id: repeatedExistingId, amount: "12.34" }),
+          settledTransaction({ id: repeatedExistingId, amount: "12.34" }),
+          settledTransaction({ id: repeatedExistingId, amount: "12.34" }),
+          settledTransaction({ id: repeatedExistingId, amount: "12.34" }),
+          settledTransaction({ id: repeatedExistingId, amount: "12.34" }),
+          settledTransaction({ id: "tx-older-new", amount: "4.56" }),
+        ],
+      },
+    })
+
+    expect(receiptPayloads.map((payload) => payload.value.fdxTransactionId)).toEqual([
+      "tx-older-new",
+    ])
+    expect(paymentPayloads).toEqual([])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 6,
+      receiptsCreated: 1,
+      duplicatesSkipped: 5,
       errors: 0,
     })
   }),

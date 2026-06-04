@@ -12,6 +12,7 @@ import {
 } from "@app/manager-api/ManagerAkahuTransactionSync"
 import {
   fetchManagerBankOrCashAccountSyncRead,
+  type ManagerBankOrCashAccountSyncRead,
   type ManagerBankOrCashAccountSyncReadClient,
 } from "@app/manager-api/ManagerBatchPagination"
 import { getManagerBankAccountCurrencyImportDecision } from "@app/manager-api/ManagerCompatibility"
@@ -58,6 +59,37 @@ export class ManagerAkahuSettledSyncConfigurationError extends Schema.TaggedErro
     message: Schema.String,
   },
 ) {}
+
+const managerAkahuSettledExistingOverlapLimit = 5
+
+interface ManagerAkahuSettledAccountProcessorState {
+  readonly counts: ManagerAkahuSyncSummaryCounts
+  readonly warnings: ReadonlyArray<string>
+  readonly errors: ReadonlyArray<string>
+  readonly createdFdxTransactionIds: ReadonlySet<string>
+  readonly existingSettledOverlapIds: ReadonlySet<string>
+}
+
+type ManagerAkahuSettledAccountProcessorResult =
+  | {
+      readonly _tag: "continue"
+      readonly state: ManagerAkahuSettledAccountProcessorState
+    }
+  | {
+      readonly _tag: "stop"
+      readonly state: ManagerAkahuSettledAccountProcessorState
+      readonly reason: {
+        readonly _tag: "existingOverlapLimitReached"
+        readonly limit: number
+      }
+    }
+
+interface ManagerAkahuSettledAccountProcessorInput {
+  readonly account: LinkedAccount
+  readonly client: ManagerAkahuSettledSyncManagerClient
+  readonly syncRead: ManagerBankOrCashAccountSyncRead
+  readonly importabilityDecision: ReturnType<typeof getManagerBankAccountCurrencyImportDecision>
+}
 
 export class ManagerSyncFlows extends Context.Service<
   ManagerSyncFlows,
@@ -124,10 +156,6 @@ export const syncManagerAkahuSettledTransactions = Effect.fn("syncManagerAkahuSe
 const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
   "syncManagerAkahuSettledTransactionsForAccount",
 )(function* (input: SyncManagerAkahuSettledTransactionsInput, account: LinkedAccount) {
-  let counts = emptyManagerAkahuSyncSummaryCounts()
-  const warnings: Array<string> = []
-  const errors: Array<string> = []
-
   const syncReadResult = yield* fetchManagerBankOrCashAccountSyncRead(input.client, {
     bankOrCashAccountKey: account.key,
   }).pipe(
@@ -141,113 +169,215 @@ const syncManagerAkahuSettledTransactionsForAccount = Effect.fn(
     return buildManagerAkahuSettledSyncAccountErrorSummary(account, syncReadResult.error)
   }
 
-  const importabilityDecision = getManagerBankAccountCurrencyImportDecision(account)
-  const createdFdxTransactionIds = new Set<string>()
-  let existingSettledOverlapCount = 0
+  const processor: ManagerAkahuSettledAccountProcessorInput = {
+    account,
+    client: input.client,
+    syncRead: syncReadResult.syncRead,
+    importabilityDecision: getManagerBankAccountCurrencyImportDecision(account),
+  }
+  let processorState = initialManagerAkahuSettledAccountProcessorState()
 
-  const transactionsResult = yield* input
+  yield* input
     .fetchSettledTransactions({
       akahuAppToken: input.tokens.akahuAppToken,
       akahuUserToken: input.tokens.akahuUserToken,
       accountId: account.akahuAccount._id,
     })
     .pipe(
+      Stream.rechunk(1),
       Stream.runForEachWhile((transaction) =>
         Effect.gen(function* () {
-          counts = incrementManagerAkahuSyncSummaryCount(counts, "settledFetched")
-
-          const duplicateDecision = decideSettledDuplicateByAkahuTransactionId(
-            syncReadResult.syncRead,
-            transaction._id,
-          )
-          if (duplicateDecision._tag === "duplicate") {
-            counts = incrementManagerAkahuSyncSummaryCount(counts, "duplicatesSkipped")
-            existingSettledOverlapCount += 1
-            return existingSettledOverlapCount < 5
-          }
-
-          if (createdFdxTransactionIds.has(transaction._id)) {
-            counts = incrementManagerAkahuSyncSummaryCount(counts, "duplicatesSkipped")
-            return true
-          }
-
-          const classification = classifyManagerAkahuSuspenseImport({
-            bankOrCashAccountKey: account.key,
-            date: transaction.date,
-            signedAmount: transaction.amount,
-            reference: transaction._id,
-            description: getAkahuTransactionDescription(transaction),
-            fdxTransactionId: transaction._id,
-            clearance: { _tag: "settled" },
-            importabilityDecision,
+          const result = yield* processManagerAkahuSettledTransaction({
+            processor,
+            state: processorState,
+            transaction,
           })
-
-          switch (classification._tag) {
-            case "receipt": {
-              const writeResult = yield* input.client["POST/api4/receipt"](
-                classification.managerDecision.payload,
-              ).pipe(
-                Effect.as({ _tag: "created" as const }),
-                Effect.catch((error) =>
-                  Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-                ),
-              )
-              if (writeResult._tag === "error") {
-                errors.push(writeResult.error)
-                counts = incrementManagerAkahuSyncSummaryCount(counts, "errors")
-                return true
-              }
-              createdFdxTransactionIds.add(transaction._id)
-              counts = incrementManagerAkahuSyncSummaryCount(counts, "receiptsCreated")
-              return true
-            }
-            case "payment": {
-              const writeResult = yield* input.client["POST/api4/payment"](
-                classification.managerDecision.payload,
-              ).pipe(
-                Effect.as({ _tag: "created" as const }),
-                Effect.catch((error) =>
-                  Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-                ),
-              )
-              if (writeResult._tag === "error") {
-                errors.push(writeResult.error)
-                counts = incrementManagerAkahuSyncSummaryCount(counts, "errors")
-                return true
-              }
-              createdFdxTransactionIds.add(transaction._id)
-              counts = incrementManagerAkahuSyncSummaryCount(counts, "paymentsCreated")
-              return true
-            }
-            case "zero": {
-              counts = incrementManagerAkahuSyncSummaryCount(counts, "zeroAmountSkipped")
-              return true
-            }
-            case "unsupported": {
-              warnings.push(classification.warning)
-              counts = incrementManagerAkahuSyncSummaryCount(counts, "unsupportedSkipped")
-              counts = incrementManagerAkahuSyncSummaryCount(counts, "warnings")
-              return true
-            }
-          }
+          processorState = result.state
+          // With singleton chunks in the pinned Effect runtime, returning true ends the pull loop.
+          return result._tag === "stop"
         }),
       ),
-      Effect.as({ _tag: "processed" as const }),
-      Effect.catch((error) =>
-        Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
-      ),
+      Effect.catch((error) => {
+        processorState = addManagerAkahuSettledAccountProcessorError(
+          processorState,
+          formatSyncError(error),
+        )
+        return Effect.void
+      }),
     )
 
-  if (transactionsResult._tag === "error") {
-    return buildManagerAkahuSettledSyncAccountErrorSummary(account, transactionsResult.error)
-  }
+  return buildManagerAkahuSettledSyncAccountSummaryFromProcessorState(account, processorState)
+})
 
-  return {
-    account,
-    counts,
-    warnings,
-    errors,
-  }
+const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSettledTransaction")(
+  function* (input: {
+    readonly processor: ManagerAkahuSettledAccountProcessorInput
+    readonly state: ManagerAkahuSettledAccountProcessorState
+    readonly transaction: Transaction
+  }) {
+    const { account, client, importabilityDecision, syncRead } = input.processor
+    const transaction = input.transaction
+    let state = incrementManagerAkahuSettledAccountProcessorCount(input.state, "settledFetched")
+
+    const duplicateDecision = decideSettledDuplicateByAkahuTransactionId(syncRead, transaction._id)
+    if (duplicateDecision._tag === "duplicate") {
+      state = incrementManagerAkahuSettledAccountProcessorCount(state, "duplicatesSkipped")
+      state = addManagerAkahuSettledAccountProcessorExistingOverlap(state, transaction._id)
+      return buildManagerAkahuSettledAccountProcessorResult(state)
+    }
+
+    if (state.createdFdxTransactionIds.has(transaction._id)) {
+      state = incrementManagerAkahuSettledAccountProcessorCount(state, "duplicatesSkipped")
+      return continueManagerAkahuSettledAccountProcessor(state)
+    }
+
+    const classification = classifyManagerAkahuSuspenseImport({
+      bankOrCashAccountKey: account.key,
+      date: transaction.date,
+      signedAmount: transaction.amount,
+      reference: transaction._id,
+      description: getAkahuTransactionDescription(transaction),
+      fdxTransactionId: transaction._id,
+      clearance: { _tag: "settled" },
+      importabilityDecision,
+    })
+
+    switch (classification._tag) {
+      case "receipt": {
+        const writeResult = yield* client["POST/api4/receipt"](
+          classification.managerDecision.payload,
+        ).pipe(
+          Effect.as({ _tag: "created" as const }),
+          Effect.catch((error) =>
+            Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+          ),
+        )
+        if (writeResult._tag === "error") {
+          return continueManagerAkahuSettledAccountProcessor(
+            addManagerAkahuSettledAccountProcessorError(state, writeResult.error),
+          )
+        }
+        state = addManagerAkahuSettledAccountProcessorCreatedFdxTransactionId(
+          state,
+          transaction._id,
+        )
+        state = incrementManagerAkahuSettledAccountProcessorCount(state, "receiptsCreated")
+        return continueManagerAkahuSettledAccountProcessor(state)
+      }
+      case "payment": {
+        const writeResult = yield* client["POST/api4/payment"](
+          classification.managerDecision.payload,
+        ).pipe(
+          Effect.as({ _tag: "created" as const }),
+          Effect.catch((error) =>
+            Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+          ),
+        )
+        if (writeResult._tag === "error") {
+          return continueManagerAkahuSettledAccountProcessor(
+            addManagerAkahuSettledAccountProcessorError(state, writeResult.error),
+          )
+        }
+        state = addManagerAkahuSettledAccountProcessorCreatedFdxTransactionId(
+          state,
+          transaction._id,
+        )
+        state = incrementManagerAkahuSettledAccountProcessorCount(state, "paymentsCreated")
+        return continueManagerAkahuSettledAccountProcessor(state)
+      }
+      case "zero": {
+        state = incrementManagerAkahuSettledAccountProcessorCount(state, "zeroAmountSkipped")
+        return continueManagerAkahuSettledAccountProcessor(state)
+      }
+      case "unsupported": {
+        state = addManagerAkahuSettledAccountProcessorWarning(state, classification.warning)
+        state = incrementManagerAkahuSettledAccountProcessorCount(state, "unsupportedSkipped")
+        state = incrementManagerAkahuSettledAccountProcessorCount(state, "warnings")
+        return continueManagerAkahuSettledAccountProcessor(state)
+      }
+    }
+  },
+)
+
+const initialManagerAkahuSettledAccountProcessorState =
+  (): ManagerAkahuSettledAccountProcessorState => ({
+    counts: emptyManagerAkahuSyncSummaryCounts(),
+    warnings: [],
+    errors: [],
+    createdFdxTransactionIds: new Set(),
+    existingSettledOverlapIds: new Set(),
+  })
+
+const incrementManagerAkahuSettledAccountProcessorCount = (
+  state: ManagerAkahuSettledAccountProcessorState,
+  count: keyof ManagerAkahuSyncSummaryCounts,
+): ManagerAkahuSettledAccountProcessorState => ({
+  ...state,
+  counts: incrementManagerAkahuSyncSummaryCount(state.counts, count),
+})
+
+const addManagerAkahuSettledAccountProcessorWarning = (
+  state: ManagerAkahuSettledAccountProcessorState,
+  warning: string,
+): ManagerAkahuSettledAccountProcessorState => ({
+  ...state,
+  warnings: [...state.warnings, warning],
+})
+
+const addManagerAkahuSettledAccountProcessorError = (
+  state: ManagerAkahuSettledAccountProcessorState,
+  error: string,
+): ManagerAkahuSettledAccountProcessorState => ({
+  ...state,
+  counts: incrementManagerAkahuSyncSummaryCount(state.counts, "errors"),
+  errors: [...state.errors, error],
+})
+
+const addManagerAkahuSettledAccountProcessorCreatedFdxTransactionId = (
+  state: ManagerAkahuSettledAccountProcessorState,
+  fdxTransactionId: string,
+): ManagerAkahuSettledAccountProcessorState => ({
+  ...state,
+  createdFdxTransactionIds: new Set(state.createdFdxTransactionIds).add(fdxTransactionId),
+})
+
+const addManagerAkahuSettledAccountProcessorExistingOverlap = (
+  state: ManagerAkahuSettledAccountProcessorState,
+  fdxTransactionId: string,
+): ManagerAkahuSettledAccountProcessorState => ({
+  ...state,
+  existingSettledOverlapIds: new Set(state.existingSettledOverlapIds).add(fdxTransactionId),
+})
+
+const buildManagerAkahuSettledAccountProcessorResult = (
+  state: ManagerAkahuSettledAccountProcessorState,
+): ManagerAkahuSettledAccountProcessorResult =>
+  state.existingSettledOverlapIds.size >= managerAkahuSettledExistingOverlapLimit
+    ? {
+        _tag: "stop",
+        state,
+        reason: {
+          _tag: "existingOverlapLimitReached",
+          limit: managerAkahuSettledExistingOverlapLimit,
+        },
+      }
+    : continueManagerAkahuSettledAccountProcessor(state)
+
+const continueManagerAkahuSettledAccountProcessor = (
+  state: ManagerAkahuSettledAccountProcessorState,
+): ManagerAkahuSettledAccountProcessorResult => ({
+  _tag: "continue",
+  state,
+})
+
+const buildManagerAkahuSettledSyncAccountSummaryFromProcessorState = (
+  account: LinkedAccount,
+  state: ManagerAkahuSettledAccountProcessorState,
+): ManagerAkahuSettledSyncAccountSummary => ({
+  account,
+  counts: state.counts,
+  warnings: state.warnings,
+  errors: state.errors,
 })
 
 const readManagerAkahuSyncTokens = Effect.fn("readManagerAkahuSyncTokens")(function* (
