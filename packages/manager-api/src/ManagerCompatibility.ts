@@ -1,10 +1,8 @@
 import type {
   BankAccountClearStatus as ManagerBankAccountClearStatus,
   BankOrCashAccount as ManagerBankOrCashAccount,
-  Payment2 as ManagerPaymentCreate,
-  PostPayment as ManagerPostPayment,
-  PostReceipt as ManagerPostReceipt,
   Receipt2 as ManagerReceiptCreate,
+  Payment2 as ManagerPaymentCreate,
 } from "./ManagerClient.ts"
 
 export const ManagerBankAccountClearStatusValue = {
@@ -17,11 +15,44 @@ export type ManagerImportClearance = { readonly _tag: "settled" } | { readonly _
 export interface ManagerSuspenseImportInput {
   readonly bankOrCashAccountKey: string
   readonly date: string
-  readonly amount: number | string
+  readonly amount: string
   readonly reference: string
   readonly description: string
   readonly fdxTransactionId: string
   readonly clearance: ManagerImportClearance
+}
+
+export interface ManagerSuspenseLine {
+  readonly amount: string
+  readonly lineDescription: string
+}
+
+export interface ManagerSuspenseReceiptValue {
+  readonly date: NonNullable<ManagerReceiptCreate["date"]>
+  readonly reference: NonNullable<ManagerReceiptCreate["reference"]>
+  readonly receivedIn: NonNullable<ManagerReceiptCreate["receivedIn"]>
+  readonly cleared: NonNullable<ManagerReceiptCreate["cleared"]>
+  readonly description: NonNullable<ManagerReceiptCreate["description"]>
+  readonly lines: readonly [ManagerSuspenseLine]
+  readonly fdxTransactionId: NonNullable<ManagerReceiptCreate["fdxTransactionId"]>
+}
+
+export interface ManagerSuspenseReceiptPayload {
+  readonly value: ManagerSuspenseReceiptValue
+}
+
+export interface ManagerSuspensePaymentValue {
+  readonly date: NonNullable<ManagerPaymentCreate["date"]>
+  readonly reference: NonNullable<ManagerPaymentCreate["reference"]>
+  readonly paidFrom: NonNullable<ManagerPaymentCreate["paidFrom"]>
+  readonly cleared: NonNullable<ManagerPaymentCreate["cleared"]>
+  readonly description: NonNullable<ManagerPaymentCreate["description"]>
+  readonly lines: readonly [ManagerSuspenseLine]
+  readonly fdxTransactionId: NonNullable<ManagerPaymentCreate["fdxTransactionId"]>
+}
+
+export interface ManagerSuspensePaymentPayload {
+  readonly value: ManagerSuspensePaymentValue
 }
 
 export type ManagerBankAccountCurrencyImportDecision =
@@ -48,7 +79,7 @@ const buildManagerClearanceFields = (clearance: ManagerImportClearance) =>
 
 export const buildManagerSuspenseReceiptPayload = (
   input: ManagerSuspenseImportInput,
-): ManagerPostReceipt => ({
+): ManagerSuspenseReceiptPayload => ({
   value: {
     date: input.date,
     reference: input.reference,
@@ -62,7 +93,7 @@ export const buildManagerSuspenseReceiptPayload = (
 
 export const buildManagerSuspensePaymentPayload = (
   input: ManagerSuspenseImportInput,
-): ManagerPostPayment => ({
+): ManagerSuspensePaymentPayload => ({
   value: {
     date: input.date,
     reference: input.reference,
@@ -73,12 +104,6 @@ export const buildManagerSuspensePaymentPayload = (
     fdxTransactionId: input.fdxTransactionId,
   },
 })
-
-export const managerSuspenseReceiptValueCanOmitPaidBy = (value: ManagerReceiptCreate): boolean =>
-  value.paidBy === undefined
-
-export const managerSuspensePaymentValueCanOmitPayee = (value: ManagerPaymentCreate): boolean =>
-  value.payee === undefined
 
 export const getManagerBankAccountCurrencyImportDecision = (
   account: Pick<ManagerBankOrCashAccount, "currency" | "name">,
