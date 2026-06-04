@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { expect, test } from "vite-plus/test"
 import type {
+  ManagerBankOrCashAccountBatchReadInput,
   ManagerBankOrCashAccountSyncReadClient,
   ManagerPaymentBatchClient,
   ManagerPaymentBatchParams,
@@ -16,6 +17,15 @@ import {
   managerBatchReadDefaultPageSize,
 } from "../src/index.ts"
 
+const bankOrCashAccountKey = "bank-1"
+const business = "business-1"
+const fullPageSize = managerBatchReadDefaultPageSize
+
+const publicSyncReadInput = {
+  bankOrCashAccountKey,
+  business,
+} satisfies ManagerBankOrCashAccountBatchReadInput
+
 const receiptItem = (key: string, fdxTransactionId: string): ManagerReceiptItem => ({
   key,
   item: { fdxTransactionId },
@@ -30,25 +40,77 @@ const paymentItem = (key: string, fdxTransactionId: string): ManagerPaymentItem 
   _actions: null,
 })
 
+const pageSkip = (pageIndex: number) => pageIndex * fullPageSize
+
+const pageItemNumber = (pageIndex: number, pageOffset = 0) => pageSkip(pageIndex) + pageOffset + 1
+
+const itemKey = (kind: "receipt" | "payment", pageIndex: number, pageOffset = 0) =>
+  `${kind}-${pageItemNumber(pageIndex, pageOffset)}`
+
+const totalItems = (...pageCounts: ReadonlyArray<number>) =>
+  pageCounts.reduce((total, pageCount) => total + pageCount, 0)
+
 const receiptItems = (
-  firstKeyNumber: number,
+  pageIndex: number,
   count: number,
   fdxTransactionIds: ReadonlyMap<number, string> = new Map(),
 ): ReadonlyArray<ManagerReceiptItem> =>
   Array.from({ length: count }, (_, index) => {
-    const keyNumber = firstKeyNumber + index
-    return receiptItem(`receipt-${keyNumber}`, fdxTransactionIds.get(keyNumber) ?? "")
+    const keyNumber = pageItemNumber(pageIndex, index)
+    return receiptItem(`receipt-${keyNumber}`, fdxTransactionIds.get(index) ?? "")
   })
 
 const paymentItems = (
-  firstKeyNumber: number,
+  pageIndex: number,
   count: number,
   fdxTransactionIds: ReadonlyMap<number, string> = new Map(),
 ): ReadonlyArray<ManagerPaymentItem> =>
   Array.from({ length: count }, (_, index) => {
-    const keyNumber = firstKeyNumber + index
-    return paymentItem(`payment-${keyNumber}`, fdxTransactionIds.get(keyNumber) ?? "")
+    const keyNumber = pageItemNumber(pageIndex, index)
+    return paymentItem(`payment-${keyNumber}`, fdxTransactionIds.get(index) ?? "")
   })
+
+const receiptPage = (
+  pageIndex: number,
+  count: number,
+  fdxTransactionIds: ReadonlyMap<number, string> = new Map(),
+): readonly [number, ReadonlyArray<ManagerReceiptItem>] => [
+  pageSkip(pageIndex),
+  receiptItems(pageIndex, count, fdxTransactionIds),
+]
+
+const paymentPage = (
+  pageIndex: number,
+  count: number,
+  fdxTransactionIds: ReadonlyMap<number, string> = new Map(),
+): readonly [number, ReadonlyArray<ManagerPaymentItem>] => [
+  pageSkip(pageIndex),
+  paymentItems(pageIndex, count, fdxTransactionIds),
+]
+
+const expectKeyAtPageOffset = (
+  items: ReadonlyArray<{ readonly key: string }>,
+  kind: "receipt" | "payment",
+  pageIndex: number,
+  pageOffset = 0,
+) => {
+  expect(items[pageSkip(pageIndex) + pageOffset]?.key).toBe(itemKey(kind, pageIndex, pageOffset))
+}
+
+const expectBatchRequests = (
+  requests: ReadonlyArray<ManagerReceiptBatchParams | ManagerPaymentBatchParams>,
+  pageIndexes: ReadonlyArray<number>,
+  options: { readonly business?: string } = {},
+) => {
+  expect(requests).toEqual(
+    pageIndexes.map((pageIndex) => ({
+      BankOrCashAccount: bankOrCashAccountKey,
+      Business: options.business,
+      Skip: pageSkip(pageIndex),
+      PageSize: managerBatchReadDefaultPageSize,
+    })),
+  )
+}
 
 const makeReceiptBatchClient = (
   pages: ReadonlyMap<number, ReadonlyArray<ManagerReceiptItem>>,
@@ -93,108 +155,47 @@ const makeSyncReadClient = (options: {
 test("fetches every Manager receipt batch page for the selected bank/cash account", () => {
   const requests: Array<ManagerReceiptBatchParams> = []
   const pages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
-    [0, receiptItems(1, managerBatchReadDefaultPageSize)],
-    [
-      managerBatchReadDefaultPageSize,
-      receiptItems(
-        managerBatchReadDefaultPageSize + 1,
-        managerBatchReadDefaultPageSize,
-        new Map([[managerBatchReadDefaultPageSize + 1, "akahu-tx-existing"]]),
-      ),
-    ],
-    [managerBatchReadDefaultPageSize * 2, receiptItems(managerBatchReadDefaultPageSize * 2 + 1, 1)],
+    receiptPage(0, fullPageSize),
+    receiptPage(1, fullPageSize, new Map([[0, "akahu-tx-existing"]])),
+    receiptPage(2, 1),
   ])
   const client = makeReceiptBatchClient(pages, requests)
 
   return Effect.runPromise(
-    fetchAllManagerReceiptsForBankOrCashAccount(client, {
-      bankOrCashAccountKey: "bank-1",
-      business: "business-1",
-    }),
+    fetchAllManagerReceiptsForBankOrCashAccount(client, publicSyncReadInput),
   ).then((receipts) => {
-    expect(receipts).toHaveLength(managerBatchReadDefaultPageSize * 2 + 1)
-    expect(receipts[0]?.key).toBe("receipt-1")
-    expect(receipts[managerBatchReadDefaultPageSize]?.key).toBe(
-      `receipt-${managerBatchReadDefaultPageSize + 1}`,
-    )
-    expect(receipts[managerBatchReadDefaultPageSize * 2]?.key).toBe(
-      `receipt-${managerBatchReadDefaultPageSize * 2 + 1}`,
-    )
+    expect(receipts).toHaveLength(totalItems(fullPageSize, fullPageSize, 1))
+    expectKeyAtPageOffset(receipts, "receipt", 0)
+    expectKeyAtPageOffset(receipts, "receipt", 1)
+    expectKeyAtPageOffset(receipts, "receipt", 2)
     expect(receipts.some((receipt) => receipt.item.fdxTransactionId === "akahu-tx-existing")).toBe(
       true,
     )
-    expect(requests).toEqual([
-      {
-        BankOrCashAccount: "bank-1",
-        Business: "business-1",
-        Skip: 0,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-      {
-        BankOrCashAccount: "bank-1",
-        Business: "business-1",
-        Skip: managerBatchReadDefaultPageSize,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-      {
-        BankOrCashAccount: "bank-1",
-        Business: "business-1",
-        Skip: managerBatchReadDefaultPageSize * 2,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-    ])
+    expectBatchRequests(requests, [0, 1, 2], { business })
   })
 })
 
 test("fetches every Manager payment batch page for the selected bank/cash account", () => {
   const requests: Array<ManagerPaymentBatchParams> = []
   const pages = new Map<number, ReadonlyArray<ManagerPaymentItem>>([
-    [0, paymentItems(1, managerBatchReadDefaultPageSize)],
-    [
-      managerBatchReadDefaultPageSize,
-      paymentItems(
-        managerBatchReadDefaultPageSize + 1,
-        managerBatchReadDefaultPageSize,
-        new Map([[managerBatchReadDefaultPageSize + 1, "akahu-tx-existing"]]),
-      ),
-    ],
-    [managerBatchReadDefaultPageSize * 2, []],
+    paymentPage(0, fullPageSize),
+    paymentPage(1, fullPageSize, new Map([[0, "akahu-tx-existing"]])),
+    paymentPage(2, 0),
   ])
   const client = makePaymentBatchClient(pages, requests)
 
   return Effect.runPromise(
     fetchAllManagerPaymentsForBankOrCashAccount(client, {
-      bankOrCashAccountKey: "bank-1",
+      bankOrCashAccountKey,
     }),
   ).then((payments) => {
-    expect(payments).toHaveLength(managerBatchReadDefaultPageSize * 2)
-    expect(payments[0]?.key).toBe("payment-1")
-    expect(payments[managerBatchReadDefaultPageSize]?.key).toBe(
-      `payment-${managerBatchReadDefaultPageSize + 1}`,
-    )
+    expect(payments).toHaveLength(totalItems(fullPageSize, fullPageSize))
+    expectKeyAtPageOffset(payments, "payment", 0)
+    expectKeyAtPageOffset(payments, "payment", 1)
     expect(payments.some((payment) => payment.item.fdxTransactionId === "akahu-tx-existing")).toBe(
       true,
     )
-    expect(requests).toEqual([
-      {
-        BankOrCashAccount: "bank-1",
-        Business: undefined,
-        Skip: 0,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-      {
-        BankOrCashAccount: "bank-1",
-        Business: undefined,
-        Skip: managerBatchReadDefaultPageSize,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-      {
-        BankOrCashAccount: "bank-1",
-        Business: undefined,
-        Skip: managerBatchReadDefaultPageSize * 2,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-    ])
+    expectBatchRequests(requests, [0, 1, 2])
   })
 })
 
@@ -202,34 +203,33 @@ test("fetches the canonical Manager sync read model with receipt and payment fdx
   const receiptRequests: Array<ManagerReceiptBatchParams> = []
   const paymentRequests: Array<ManagerPaymentBatchParams> = []
   const receiptPages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
-    [0, receiptItems(1, managerBatchReadDefaultPageSize, new Map([[1, "receipt-first-page"]]))],
-    [
-      managerBatchReadDefaultPageSize,
-      [
-        receiptItem(`receipt-${managerBatchReadDefaultPageSize + 1}`, "akahu-tx-existing"),
-        receiptItem(`receipt-${managerBatchReadDefaultPageSize + 2}`, "receipt-last"),
-      ],
-    ],
+    receiptPage(0, fullPageSize, new Map([[0, "receipt-first-page"]])),
+    receiptPage(
+      1,
+      2,
+      new Map([
+        [0, "akahu-tx-existing"],
+        [1, "receipt-last"],
+      ]),
+    ),
   ])
   const paymentPages = new Map<number, ReadonlyArray<ManagerPaymentItem>>([
-    [
+    paymentPage(
       0,
-      paymentItems(
-        1,
-        managerBatchReadDefaultPageSize,
-        new Map([
-          [1, "payment-first-page"],
-          [2, "payment-2"],
-        ]),
-      ),
-    ],
-    [
-      managerBatchReadDefaultPageSize,
-      [
-        paymentItem(`payment-${managerBatchReadDefaultPageSize + 1}`, "akahu-tx-existing"),
-        paymentItem(`payment-${managerBatchReadDefaultPageSize + 2}`, "payment-last"),
-      ],
-    ],
+      fullPageSize,
+      new Map([
+        [0, "payment-first-page"],
+        [1, "payment-2"],
+      ]),
+    ),
+    paymentPage(
+      1,
+      2,
+      new Map([
+        [0, "akahu-tx-existing"],
+        [1, "payment-last"],
+      ]),
+    ),
   ])
   const client = makeSyncReadClient({
     receiptPages,
@@ -238,24 +238,17 @@ test("fetches the canonical Manager sync read model with receipt and payment fdx
     paymentRequests,
   })
 
-  return Effect.runPromise(
-    fetchManagerBankOrCashAccountSyncRead(client, {
-      bankOrCashAccountKey: "bank-1",
-      business: "business-1",
-    }),
-  ).then((syncRead) => {
-    expect(syncRead.receipts).toHaveLength(managerBatchReadDefaultPageSize + 2)
-    expect(syncRead.payments).toHaveLength(managerBatchReadDefaultPageSize + 2)
-    expect(syncRead.receipts[0]?.key).toBe("receipt-1")
-    expect(syncRead.receipts[managerBatchReadDefaultPageSize]?.key).toBe(
-      `receipt-${managerBatchReadDefaultPageSize + 1}`,
-    )
-    expect(syncRead.payments[0]?.key).toBe("payment-1")
-    expect(syncRead.payments[managerBatchReadDefaultPageSize]?.key).toBe(
-      `payment-${managerBatchReadDefaultPageSize + 1}`,
-    )
-    expect(syncRead.existingFdxTransactionIdEntries.map((entry) => entry.fdxTransactionId)).toEqual(
-      [
+  return Effect.runPromise(fetchManagerBankOrCashAccountSyncRead(client, publicSyncReadInput)).then(
+    (syncRead) => {
+      expect(syncRead.receipts).toHaveLength(totalItems(fullPageSize, 2))
+      expect(syncRead.payments).toHaveLength(totalItems(fullPageSize, 2))
+      expectKeyAtPageOffset(syncRead.receipts, "receipt", 0)
+      expectKeyAtPageOffset(syncRead.receipts, "receipt", 1)
+      expectKeyAtPageOffset(syncRead.payments, "payment", 0)
+      expectKeyAtPageOffset(syncRead.payments, "payment", 1)
+      expect(
+        syncRead.existingFdxTransactionIdEntries.map((entry) => entry.fdxTransactionId),
+      ).toEqual([
         "receipt-first-page",
         "akahu-tx-existing",
         "receipt-last",
@@ -263,49 +256,23 @@ test("fetches the canonical Manager sync read model with receipt and payment fdx
         "payment-2",
         "akahu-tx-existing",
         "payment-last",
-      ],
-    )
-    expect(syncRead.existingFdxTransactionIdIndex.get("akahu-tx-existing")).toEqual([
-      {
-        _tag: "receipt",
-        fdxTransactionId: "akahu-tx-existing",
-        key: `receipt-${managerBatchReadDefaultPageSize + 1}`,
-        receipt: receiptItem(`receipt-${managerBatchReadDefaultPageSize + 1}`, "akahu-tx-existing"),
-      },
-      {
-        _tag: "payment",
-        fdxTransactionId: "akahu-tx-existing",
-        key: `payment-${managerBatchReadDefaultPageSize + 1}`,
-        payment: paymentItem(`payment-${managerBatchReadDefaultPageSize + 1}`, "akahu-tx-existing"),
-      },
-    ])
-    expect(receiptRequests).toEqual([
-      {
-        BankOrCashAccount: "bank-1",
-        Business: "business-1",
-        Skip: 0,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-      {
-        BankOrCashAccount: "bank-1",
-        Business: "business-1",
-        Skip: managerBatchReadDefaultPageSize,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-    ])
-    expect(paymentRequests).toEqual([
-      {
-        BankOrCashAccount: "bank-1",
-        Business: "business-1",
-        Skip: 0,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-      {
-        BankOrCashAccount: "bank-1",
-        Business: "business-1",
-        Skip: managerBatchReadDefaultPageSize,
-        PageSize: managerBatchReadDefaultPageSize,
-      },
-    ])
-  })
+      ])
+      expect(syncRead.existingFdxTransactionIdIndex.get("akahu-tx-existing")).toEqual([
+        {
+          _tag: "receipt",
+          fdxTransactionId: "akahu-tx-existing",
+          key: itemKey("receipt", 1),
+          receipt: receiptItem(itemKey("receipt", 1), "akahu-tx-existing"),
+        },
+        {
+          _tag: "payment",
+          fdxTransactionId: "akahu-tx-existing",
+          key: itemKey("payment", 1),
+          payment: paymentItem(itemKey("payment", 1), "akahu-tx-existing"),
+        },
+      ])
+      expectBatchRequests(receiptRequests, [0, 1], { business })
+      expectBatchRequests(paymentRequests, [0, 1], { business })
+    },
+  )
 })
