@@ -511,6 +511,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the important coverage from the completed task: RPC-level `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` must still return all items across cursor pages; pending transaction pages must still assert `amount_as_number=true`; `paginatedAkahuItems` must remain private. (completed)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass.
 
+### Task 2 follow-up review follow-up: Collapse duplicate Akahu live RPC composition
+
+- Collapse the remaining duplicated Akahu live-layer composition in `apps/server/src/rpc.ts`. The current seam cleanup leaves both `ApiHandlers = ApiHandlersBase.pipe(Layer.provide(Akahu.layer))` and `RpcRoute = RpcRouteBase.pipe(Layer.provide(Akahu.layer))`, even though `ApiHandlers` appears unused in the repo. This gives future callers two live surfaces that independently compose the same Akahu service layer.
+- Prefer one canonical live composition path: either remove the unused live `ApiHandlers` export and keep `RpcRouteBase`/`RpcRoute` as the route boundary, or define `RpcRoute` in terms of the live `ApiHandlers` so `Akahu.layer` is provided in exactly one place.
+- Preserve `ApiHandlersBase` only if tests still need the handler-level mock-Akahu seam. Do not reintroduce negative/test-only production names or an HTTP-client-specific Akahu helper.
+- Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass.
+
 ### Task 3: Setup-state flow, atom, and minimal setup UI
 
 - Add extended LinkedAccount metadata including canHavePendingTransactions and currency.
