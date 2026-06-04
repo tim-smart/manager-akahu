@@ -414,6 +414,13 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Update focused compatibility tests to cover the canonical decision helper for positive receipt, negative payment, zero skip, settled clearance, pending clearance, direct payload shapes, and generated endpoint assignability.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
+### Task 1 follow-up review follow-up: Simplify compatibility contract tests
+
+- Collapse the duplicated receipt/payment payload literals in `packages/manager-api/tests/ManagerCompatibility.test.ts`. The current positive receipt and negative payment decision tests already assert the full payload shape, and the separate direct payload-shape tests repeat the same schemas. Prefer one expected literal per receipt/payment scenario plus small assertion helpers for branch narrowing and omission checks (`paidBy`/`payee`/`bankClearDate`) so future Manager shape changes update one place instead of two.
+- Keep generated endpoint assignability close to the production boundary. `ManagerSuspenseReceiptPayload extends ManagerPostReceipt` and `ManagerSuspensePaymentPayload extends ManagerPostPayment` already give source-level build coverage; make that intentional and obvious with source-local type aliases/assertions or comments near the payload types, then leave tests focused on behavior and the verified omitted-field invariants. Avoid relying on test-only `satisfies` checks as the main signal for generated client drift.
+- Avoid adding new wrapper helpers solely for tests. If assertion helpers are introduced, they should remove duplicated branch guards and payload literals rather than creating another abstraction layer around `buildManagerSuspenseImportDecision`.
+- Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
+
 ### Task 2: Pagination foundations
 
 - Extend server/RPC Akahu reads to fetch all pages for accounts and settled/pending account transactions when cursor.next is present.
