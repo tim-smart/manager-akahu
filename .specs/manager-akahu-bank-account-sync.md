@@ -674,6 +674,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Update validation for this boundary to name the enforced typecheck command in addition to the existing domain/runtime test and downstream build checks. (completed)
 - Validation: `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/domain test:types` pass.
 
+### Task 4 Akahu date typetest boundary review: Accept implementation (completed)
+
+- Deep code-quality review found no actionable structural follow-up for the Akahu transaction date typetest implementation. Keep the nominality proof in `packages/domain/typetests/AkahuTransactionDate.typetest.ts`, keep `packages/domain/src/Akahu.ts` free of production-only nominal guard scaffolding, and keep the runtime Akahu tests focused on decode/encode behavior and malformed calendar rejection. (completed)
+- Preserve the `pnpm --filter @app/domain test:types` no-emit boundary as the validation command for this type-only contract. Do not replace it with a runtime Vitest-only `@ts-expect-error`, a production static self-test member, a private phantom field, or another wrapper abstraction that adds indirection without improving the schema model. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/domain test:types` passing.
+
 ### Task 5: Hidden settled-transaction sync service with mocked tests
 
 - Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
