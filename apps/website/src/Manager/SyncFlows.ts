@@ -22,6 +22,7 @@ import {
 } from "@app/manager-api/ManagerBatchPagination"
 import {
   getManagerBankAccountCurrencyImportDecision,
+  type ManagerBankAccountCurrencyImportDecision,
   type ManagerSuspensePaymentValue,
   type ManagerSuspenseReceiptValue,
 } from "@app/manager-api/ManagerCompatibility"
@@ -102,6 +103,11 @@ type ManagerAkahuTransactionCreateClassification = Extract<
   { readonly _tag: "receipt" | "payment" }
 >
 
+type ManagerAkahuImportableCurrencyDecision = Extract<
+  ManagerBankAccountCurrencyImportDecision,
+  { readonly _tag: "import" }
+>
+
 interface ManagerAkahuReceiptUpdatePayload {
   readonly key: string
   readonly value: ManagerSuspenseReceiptValue
@@ -116,7 +122,7 @@ interface ManagerAkahuTransactionSyncAccountContext {
   readonly account: LinkedAccount
   readonly client: ManagerAkahuTransactionSyncManagerClient
   readonly syncRead: ManagerBankOrCashAccountSyncRead
-  readonly importabilityDecision: ReturnType<typeof getManagerBankAccountCurrencyImportDecision>
+  readonly importabilityDecision: ManagerAkahuImportableCurrencyDecision
 }
 
 export class ManagerSyncFlows extends Context.Service<
@@ -193,6 +199,8 @@ const syncManagerAkahuTransactionsForAccount = Effect.fn("syncManagerAkahuTransa
       )
     }
 
+    const importableDecision: ManagerAkahuImportableCurrencyDecision = importabilityDecision
+
     const syncReadResult = yield* fetchManagerBankOrCashAccountSyncRead(input.client, {
       bankOrCashAccountKey: account.key,
     }).pipe(
@@ -210,7 +218,7 @@ const syncManagerAkahuTransactionsForAccount = Effect.fn("syncManagerAkahuTransa
       account,
       client: input.client,
       syncRead: syncReadResult.syncRead,
-      importabilityDecision,
+      importabilityDecision: importableDecision,
     }
     let accountState = initialManagerAkahuTransactionSyncAccountState()
 
