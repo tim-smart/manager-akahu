@@ -14,7 +14,8 @@
     "@effect/language-service": "catalog:",
     "@effect/tsgo": "0.13.1",
     "@typescript/native-preview": "latest",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=22.12.0"

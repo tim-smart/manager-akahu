@@ -432,23 +432,6 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Refresh setup state after completion only if useful and safe.
 - Validation: website build/typecheck, helper/service tests, and any available UI/state tests pass.
 
-### Task 8: Final validation and manual QA gate
-
-- Run the full repository validation workflow: build, tests, formatting, and linting as configured.
-- Execute manual QA:
-  - no credentials,
-  - invalid credentials,
-  - credentials with no Akahu accounts,
-  - credentials with no linked Manager accounts,
-  - stale Akahu selection,
-  - linked accounts list,
-  - single-account sync,
-  - sync all,
-  - repeated sync skips duplicates,
-  - pending supported account imports/updates pending entries,
-  - pending unsupported account does not call pending endpoint,
-  - no credential leakage in UI/errors/logs.
-
 ## Open questions
 
 None. Decisions made for this specification:
