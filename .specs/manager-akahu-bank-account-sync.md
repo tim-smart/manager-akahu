@@ -421,6 +421,14 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Add tests or mocked coverage for multi-page Akahu and Manager responses. (Akahu coverage completed; Manager coverage pending with Manager pagination helpers.)
 - Validation: `pnpm --filter server test`, `pnpm --filter server build`, and `pnpm --filter @app/domain build` pass for the Akahu pagination portion.
 
+### Task 2 follow-up: Test Akahu pagination at the service/RPC boundary
+
+- Replace or supplement the current helper-only Akahu pagination tests with tests that exercise the actual `Akahu` service and/or RPC handlers. The current tests validate the shared pagination helper but would not catch production wiring regressions where `accounts.list`, `transactions.list`, or `transactions.pending` stop forwarding cursors correctly.
+- Assert the concrete Akahu request/query shape for all three paths: account pages request `cursor`, settled transaction pages request `cursor` while preserving the existing 30-day window, and pending transaction pages request both `amount_as_number=true` and `cursor` on every page.
+- Verify RPC consumption returns all `ListAccounts`, `AccountTransactions`, and `AccountPendingTransactions` items across multiple pages, not only that the exported helper can flatten mock strings.
+- After boundary coverage exists, make `paginatedAkahuItems` private to `apps/server/src/Akahu.ts` unless another production module has a real need for it. Avoid exporting implementation details solely to test them.
+- Validation: `pnpm --filter server test`, `pnpm --filter server build`, `pnpm --filter @app/domain build`, and `pnpm ready` pass.
+
 ### Task 3: Setup-state flow, atom, and minimal setup UI
 
 - Add extended LinkedAccount metadata including canHavePendingTransactions and currency.
