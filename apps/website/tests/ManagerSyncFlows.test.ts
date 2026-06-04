@@ -22,8 +22,8 @@ import type {
 import { BigDecimal, DateTime, Effect, Redacted, Schema, Stream } from "effect"
 import { expect, it } from "@effect/vitest"
 import {
-  syncManagerAkahuSettledTransactions,
-  type ManagerAkahuSettledSyncManagerClient,
+  syncManagerAkahuTransactions,
+  type ManagerAkahuTransactionSyncManagerClient,
 } from "../src/Manager/SyncFlows.ts"
 
 const accountId = Schema.decodeSync(AccountId)("akahu-checking")
@@ -139,7 +139,7 @@ const makeMockClient = (
       [...payments],
     ]),
   )
-  const client: ManagerAkahuSettledSyncManagerClient = {
+  const client: ManagerAkahuTransactionSyncManagerClient = {
     "GET/api4/receipt-batch": (params) => {
       const bankOrCashAccount = params?.BankOrCashAccount ?? ""
       const skip = params?.Skip ?? 0
@@ -213,9 +213,9 @@ const makeMockClient = (
   } as const
 }
 
-const runSettledSync = (options: {
+const runTransactionSync = (options: {
   readonly accounts: ReadonlyArray<LinkedAccount>
-  readonly client: ManagerAkahuSettledSyncManagerClient
+  readonly client: ManagerAkahuTransactionSyncManagerClient
   readonly transactionsByAccount?: Readonly<Record<string, ReadonlyArray<Transaction>>> | undefined
   readonly pendingTransactionsByAccount?:
     | Readonly<Record<string, ReadonlyArray<PendingTransaction>>>
@@ -227,7 +227,7 @@ const runSettledSync = (options: {
     | ((request: { readonly accountId: AccountId }) => Stream.Stream<PendingTransaction, unknown>)
     | undefined
 }) =>
-  syncManagerAkahuSettledTransactions({
+  syncManagerAkahuTransactions({
     accounts: options.accounts,
     client: options.client,
     tokens,
@@ -246,7 +246,7 @@ it.effect(
       const managerAccount = linkedAccount()
       const { client, receiptPayloads, paymentPayloads } = makeMockClient()
 
-      const summary = yield* runSettledSync({
+      const summary = yield* runTransactionSync({
         accounts: [managerAccount],
         client,
         transactionsByAccount: {
@@ -310,7 +310,7 @@ it.effect("skips settled transactions whose fdxTransactionId already exists in M
       },
     })
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       transactionsByAccount: {
@@ -350,7 +350,7 @@ it.effect(
         },
       })
 
-      const summary = yield* runSettledSync({
+      const summary = yield* runTransactionSync({
         accounts: [managerAccount],
         client,
         transactionsByAccount: {
@@ -383,7 +383,7 @@ it.effect("continues settled sync past fewer than five overlaps", () =>
       },
     })
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       transactionsByAccount: {
@@ -415,7 +415,7 @@ it.effect(
       const managerAccount = linkedAccount()
       const { client, receiptPayloads, paymentPayloads } = makeMockClient()
 
-      const summary = yield* runSettledSync({
+      const summary = yield* runTransactionSync({
         accounts: [managerAccount],
         client,
         fetchSettledTransactions: () =>
@@ -455,7 +455,7 @@ it.effect("does not count repeated existing settled IDs as multiple overlap slot
       },
     })
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       transactionsByAccount: {
@@ -488,7 +488,7 @@ it.effect("skips zero-amount settled transactions without Manager writes", () =>
     const managerAccount = linkedAccount()
     const { client, receiptPayloads, paymentPayloads } = makeMockClient()
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       transactionsByAccount: {
@@ -513,7 +513,7 @@ it.effect("skips unsupported foreign-currency Manager accounts with warnings", (
     const managerAccount = linkedAccount({ currency: "USD" })
     const { client, receiptPayloads, paymentPayloads } = makeMockClient()
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       transactionsByAccount: {
@@ -541,7 +541,7 @@ it.effect("does not fetch pending Akahu transactions for accounts that do not su
     const { client } = makeMockClient()
     const pendingAccountIds: Array<AccountId> = []
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       fetchPendingTransactions: (request) => {
@@ -572,7 +572,7 @@ it.effect("creates new pending entries and updates exact pending fingerprint mat
       },
     })
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       transactionsByAccount: {
@@ -625,12 +625,12 @@ it.effect("repeats pending sync without creating duplicate Manager entries", () 
       [accountId]: [pendingTransaction({ amount: "4.00", description: "Repeat Coffee" })],
     }
 
-    const firstSummary = yield* runSettledSync({
+    const firstSummary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       pendingTransactionsByAccount,
     })
-    const secondSummary = yield* runSettledSync({
+    const secondSummary = yield* runTransactionSync({
       accounts: [managerAccount],
       client,
       pendingTransactionsByAccount,
@@ -681,7 +681,7 @@ it.effect("returns per-account summaries and rolled-up overall summary counts", 
       },
     })
 
-    const summary = yield* runSettledSync({
+    const summary = yield* runTransactionSync({
       accounts: [checking, savings],
       client,
       transactionsByAccount: {
