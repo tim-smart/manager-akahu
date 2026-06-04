@@ -86,6 +86,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Foreign-currency Manager bank/cash account write behaviour was not verified. `getManagerBankAccountCurrencyImportDecision` treats blank/null account currency as importable and returns a skip-with-warning decision for any non-empty currency value.
 - Task 1 follow-up tightened the suspense receipt/payment payload builders to return local payload types with required `value` objects, so downstream sync code can use `payload.value` without non-null assertions. Builder amount input is now a normalized decimal string boundary instead of `number | string`; future Akahu amount normalization must happen before calling these Manager payload builders.
 - Task 1 follow-up review replaced the public suspense receipt/payment builder pair with `buildManagerSuspenseImportDecision`. The helper now owns signed amount classification, payment absolute-amount conversion, zero-amount skipping, and importability skips before returning a receipt payload, payment payload, or explicit skip reason. Receipt/payment constructors remain private, and focused tests assert the local payloads remain assignable to the generated Manager POST endpoint wrappers.
+- Task 1 follow-up review follow-up simplified the focused compatibility contract tests so each receipt/payment scenario has one expected payload literal. Generated endpoint drift coverage now stays source-local through the `ManagerSuspenseReceiptPayload extends ManagerPostReceipt` and `ManagerSuspensePaymentPayload extends ManagerPostPayment` production payload contracts, with tests focused on behavior and omitted `paidBy`/`payee`/`bankClearDate` invariants.
 
 ## Requirements
 
@@ -414,7 +415,7 @@ Sync recent Akahu transactions into Manager receipts and payments. Transactions 
 - Update focused compatibility tests to cover the canonical decision helper for positive receipt, negative payment, zero skip, settled clearance, pending clearance, direct payload shapes, and generated endpoint assignability.
 - Validation: `pnpm --filter @app/manager-api test`, `pnpm --filter @app/manager-api build`, and `pnpm ready` pass.
 
-### Task 1 follow-up review follow-up: Simplify compatibility contract tests
+### Task 1 follow-up review follow-up: Simplify compatibility contract tests (completed)
 
 - Collapse the duplicated receipt/payment payload literals in `packages/manager-api/tests/ManagerCompatibility.test.ts`. The current positive receipt and negative payment decision tests already assert the full payload shape, and the separate direct payload-shape tests repeat the same schemas. Prefer one expected literal per receipt/payment scenario plus small assertion helpers for branch narrowing and omission checks (`paidBy`/`payee`/`bankClearDate`) so future Manager shape changes update one place instead of two.
 - Keep generated endpoint assignability close to the production boundary. `ManagerSuspenseReceiptPayload extends ManagerPostReceipt` and `ManagerSuspensePaymentPayload extends ManagerPostPayment` already give source-level build coverage; make that intentional and obvious with source-local type aliases/assertions or comments near the payload types, then leave tests focused on behavior and the verified omitted-field invariants. Avoid relying on test-only `satisfies` checks as the main signal for generated client drift.

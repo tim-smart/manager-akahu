@@ -46,6 +46,8 @@ export interface ManagerSuspenseReceiptValue extends ManagerReceiptCreate {
   readonly fdxTransactionId: NonNullable<ManagerReceiptCreate["fdxTransactionId"]>
 }
 
+// Extending the generated POST wrapper keeps this production payload boundary
+// checked at build time when ManagerClient.ts changes.
 export interface ManagerSuspenseReceiptPayload extends ManagerPostReceipt {
   readonly value: ManagerSuspenseReceiptValue
 }
@@ -60,6 +62,8 @@ export interface ManagerSuspensePaymentValue extends ManagerPaymentCreate {
   readonly fdxTransactionId: NonNullable<ManagerPaymentCreate["fdxTransactionId"]>
 }
 
+// Extending the generated POST wrapper keeps this production payload boundary
+// checked at build time when ManagerClient.ts changes.
 export interface ManagerSuspensePaymentPayload extends ManagerPostPayment {
   readonly value: ManagerSuspensePaymentValue
 }
