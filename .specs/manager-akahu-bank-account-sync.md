@@ -707,6 +707,14 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Extract the Akahu credential field-name/value/decode boundary shared by `apps/website/src/Manager/Flows.ts` and `apps/website/src/Manager/SyncFlows.ts`. Keep setup-only custom-field creation in setup flows, but avoid duplicating hardcoded credential field names, trimming rules, and `AkahuTokens` decoding in the sync service. (not completed; outside this overlap-boundary task)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass.
 
+### Task 5 follow-up review follow-up: Preserve settled stream state and extract processor
+
+- Refactor the new incremental settled stream loop in `apps/website/src/Manager/SyncFlows.ts` so `Stream.runForEachWhile` is only stream orchestration. Extract a small account-level settled transaction processor/state model that owns counts, warnings, errors, created fdx IDs, and existing-overlap state, and returns the updated state plus whether processing should continue. This should make the five-overlap stop policy explicit instead of burying duplicate detection, stop logic, classification, Manager writes, and summary mutation inside one large callback.
+- Preserve partial account summaries when the Akahu settled stream fails after one or more transactions have already been processed. The current incremental implementation can create Manager receipts/payments and then replace the accumulated counts/warnings/errors with a fresh error-only summary if a later stream read fails. Append the stream error to the accumulated state and increment `errors` so the modal can report both partial success and the fatal read failure.
+- Consider tracking existing-overlap stop progress by unique existing settled `fdxTransactionId` values rather than a raw counter. Repeated Akahu rows with the same already-imported transaction ID should not be able to consume multiple overlap slots and stop the sync before older new transactions are reached.
+- Add focused mocked tests for a stream that emits at least one successfully created settled transaction before failing, and for repeated existing overlap IDs before an older new transaction if unique-overlap tracking is adopted.
+- Validation: run `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build`.
+
 ### Task 6: Pending-transaction sync service extension with mocked tests
 
 - Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true.
