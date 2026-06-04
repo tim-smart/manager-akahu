@@ -728,6 +728,12 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the completed behavior from the prior task: unique existing-overlap IDs, partial summaries after stream failure, no import after the fifth unique existing overlap, and repeated existing IDs not consuming multiple overlap slots. (completed)
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` pass.
 
+### Task 5 follow-up review follow-up audit review: Accept settled stream workaround removal (completed)
+
+- Deep code-quality review found no actionable structural follow-up for the settled stream runtime-workaround removal. Keep settled stream orchestration on clear `Stream.takeUntilEffect(...).pipe(Stream.runDrain)` stop semantics, with transaction processing centralized in the direct processor step returning `{ state, shouldStop }`. (completed)
+- Preserve the shared settled Manager write helper as the single place that selects receipt/payment POST endpoints, maps created-count updates, handles write errors, and records created `fdxTransactionId` values. Do not reintroduce duplicated receipt/payment write branches, inverted `Stream.runForEachWhile` truthiness, singleton `Stream.rechunk(1)` dependencies, or unused stop-reason fields unless those fields are surfaced in summaries, logging, or UI state. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passing.
+
 ### Task 6: Pending-transaction sync service extension with mocked tests
 
 - Extend the hidden sync service to fetch pending Akahu transactions only when canHavePendingTransactions is true.
