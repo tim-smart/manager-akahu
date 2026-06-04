@@ -206,6 +206,7 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Akahu's documented `GET /accounts/{id}/transactions` settled account endpoint returns the full app-accessible date range by default when `start` and `end` are omitted. `apps/server/src/Akahu.ts` now names that cursor-only settled-history boundary through `settledTransactionHistoryQuery`, preserving cursor pagination without adding a fixed date window or a user-configurable date range.
 - Focused server RPC coverage now asserts the settled account transaction request query contains only cursor pagination and still returns older fixture transactions beyond a 30-day relative window across pages.
 - Focused website sync-flow coverage now asserts `syncManagerAkahuTransactions` continues past fewer than five existing Manager overlaps and imports an older settled transaction using its older Akahu calendar date. The existing five-overlap stop tests continue to prove older transactions after the fifth unique overlap are not imported.
+- Task 8 follow-up review found no actionable structural refactor beyond keeping the settled-history policy at the Akahu/domain boundary. The current code should preserve the cursor-only settled endpoint contract and existing five-overlap sync stop policy rather than adding date-range parameters, user-configurable ranges, or client/RPC payload churn unless Akahu's documented default range changes.
 
 ## Requirements
 
@@ -936,6 +937,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the existing RPC/API client payload shape because no date range is needed for settled sync history. (completed)
 - Add focused tests proving older settled transactions beyond a relative 30-day fixture window can be reached and imported before the fifth Manager overlap, while existing five-overlap stop tests continue to prove older rows after the fifth overlap are not imported. (completed)
 - Validation: `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, `pnpm --filter server build`, and `pnpm --filter website build` pass. `pnpm ready` was attempted and failed during `vp lint` on the pre-existing test import-resolution/type diagnostics around `@app/domain/*` and `@app/manager-api/*`; it did run `vp fmt` before failing.
+
+### Task 8 follow-up review: Preserve cursor-only settled boundary (completed)
+
+- Deep code-quality review found no new structural blocker in the settled-history verification change. The implementation names the existing Akahu settled-history policy without introducing a second request mode, feature flags, date-range payloads, or frontend/RPC configuration that would make sync orchestration harder to reason about. (completed)
+- Keep `AccountTransactions` as the cursor-only settled-history stream and rely on the existing settled phase to stop after five unique Manager overlaps. Do not add a parallel sync-history RPC, optional date-range fields, or a user-configurable range while Akahu continues to document omitted `start`/`end` as full app-accessible history. (completed)
+- If Akahu's settled endpoint contract changes later, put the new request boundary in the domain/server Akahu layer first and keep website sync code consuming the same account-level transaction stream instead of scattering history-window logic through `ManagerSyncFlows`. (completed)
+- Validation: not rerun for this review-only specification update; the reviewed task already records focused server/website tests and builds. (completed)
 
 ## Open questions
 
