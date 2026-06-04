@@ -143,6 +143,15 @@ The generated Manager API client includes endpoints and fields needed for this f
 - Task 4 Akahu date nominal-guard cleanup removed the production-only `AssertTrue`, structural shape alias, and static `nominalGuard` scaffolding from the domain schema class. Nominality remains provided by the `Schema.Class` brand parameter, with proof kept in focused tests rather than production code.
 - Task 4 Akahu date typetest follow-up moved the structural nominality proof out of the runtime Akahu Vitest file and into `packages/domain/typetests/AkahuTransactionDate.typetest.ts`, enforced by `pnpm --filter @app/domain test:types` through a no-emit typecheck.
 
+### Task 5 hidden settled-sync service findings
+
+- `apps/website/src/Manager/SyncFlows.ts` now exposes a hidden `ManagerSyncFlows.syncSettledTransactions` service method and an explicit `syncManagerAkahuSettledTransactions` orchestration helper for mocked tests and later UI wiring.
+- Settled sync accepts selected `LinkedAccount` values, reads Manager credentials inside the service wrapper, fetches the canonical complete Manager receipt/payment sync-read model for each account, fetches settled Akahu transactions for the linked Akahu account, and processes accounts sequentially.
+- Settled transaction decisions reuse the existing manager-api pure helpers: canonical Manager fdx duplicate lookup, amount normalization, receipt/payment/zero/unsupported classification, Manager compatibility payload builders, foreign-currency import decisions, and summary count accumulation.
+- The service creates single Manager receipt/payment POSTs only for non-duplicate positive/negative settled transactions and does not add automatic retries around Manager writes. Pending transaction reads and pending create/update/settlement logic remain intentionally untouched for Task 6.
+- Per-account summaries and the rolled-up overall summary include the shared sync count set plus warning/error detail arrays. Unsupported foreign-currency entries are counted as `unsupportedSkipped` and `warnings`; zero amounts are counted as `zeroAmountSkipped`; Manager/Akahu read failures or Manager write failures are counted as `errors`.
+- Focused mocked website tests cover receipt/payment payload creation, settled duplicate skipping, zero-amount skipping, unsupported foreign-currency skipping with warnings, and per-account/overall summary count roll-up.
+
 ## Requirements
 
 ### Setup-state UI
@@ -680,13 +689,13 @@ Sync Akahu transactions into Manager receipts and payments. Settled transactions
 - Preserve the `pnpm --filter @app/domain test:types` no-emit boundary as the validation command for this type-only contract. Do not replace it with a runtime Vitest-only `@ts-expect-error`, a production static self-test member, a private phantom field, or another wrapper abstraction that adds indirection without improving the schema model. (completed)
 - Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "packages/domain/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/domain test:types` passing.
 
-### Task 5: Hidden settled-transaction sync service with mocked tests
+### Task 5: Hidden settled-transaction sync service with mocked tests (completed)
 
-- Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet.
-- For selected linked accounts, fetch complete existing Manager receipt/payment sets, fetch settled Akahu transactions, skip duplicates by fdxTransactionId, create Manager receipts/payments for positive/negative settled transactions, skip zero amounts, and return summaries.
-- Avoid automatic retries around Manager POSTs.
-- Add mocked tests for settled receipt/payment payloads, duplicate skipping, zero skipping, and summary counts.
-- Validation: website build/typecheck and mocked settled-sync tests pass.
+- Add ManagerSyncFlows or extend ManagerFlows with a sync function that is not wired to visible UI yet. (completed with `ManagerSyncFlows.syncSettledTransactions`)
+- For selected linked accounts, fetch complete existing Manager receipt/payment sets, fetch settled Akahu transactions, skip duplicates by fdxTransactionId, create Manager receipts/payments for positive/negative settled transactions, skip zero amounts, and return summaries. (completed)
+- Avoid automatic retries around Manager POSTs. (completed; writes are single `POST/api4/receipt` / `POST/api4/payment` attempts)
+- Add mocked tests for settled receipt/payment payloads, duplicate skipping, zero skipping, and summary counts. (completed)
+- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` passes; `pnpm --filter website build` passes.
 
 ### Task 6: Pending-transaction sync service extension with mocked tests
 
