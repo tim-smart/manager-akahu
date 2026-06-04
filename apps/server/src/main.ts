@@ -1,6 +1,6 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off
 import { createServer } from "node:http"
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
+import { NodeHttpClient, NodeHttpServer, NodeRuntime } from "@effect/platform-node"
 import { Config, Layer } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { RpcRoute } from "./rpc.ts"
@@ -16,6 +16,7 @@ const ServerLive = HttpRouter.serve(RoutesLive).pipe(
       port: Config.port("PORT").pipe(Config.withDefault(3000)),
     }),
   ),
+  Layer.provide(NodeHttpClient.layerUndici),
 )
 
 NodeRuntime.runMain(Layer.launch(ServerLive))

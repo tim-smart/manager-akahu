@@ -9,7 +9,6 @@ import {
 } from "@app/domain/Akahu"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { NodeHttpClient } from "@effect/platform-node"
 
 const paginatedAkahuItems = <A, E, R>(
   fetchPage: (cursor: string | undefined) => Effect.Effect<PaginatedResponse<A>, E, R>,
@@ -43,7 +42,7 @@ export class Akahu extends Context.Service<
     }): Stream.Stream<PendingTransaction, never, AkahuCredentials>
   }
 >()("server/Akahu") {
-  static readonly layerWithHttpClient = Layer.effect(
+  static readonly layer = Layer.effect(
     Akahu,
     Effect.gen(function* () {
       const httpClient = (yield* HttpClient.HttpClient).pipe(
@@ -89,6 +88,4 @@ export class Akahu extends Context.Service<
       })
     }),
   )
-
-  static readonly layer = Akahu.layerWithHttpClient.pipe(Layer.provide(NodeHttpClient.layerUndici))
 }
