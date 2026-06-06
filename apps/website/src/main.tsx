@@ -68,9 +68,7 @@ function SetupStateView(props: {
           eyebrow="Setup required"
           title="Akahu credentials required"
           description={
-            props.setupState.missingFieldNames.length === 2
-              ? "Add your Akahu App Token and Akahu User Token in Manager Business Details before syncing bank accounts. This extension reads those Business Details custom fields to connect to Akahu."
-              : `Add your ${props.setupState.missingFieldNames[0]} in Manager Business Details before syncing bank accounts. This extension reads the Akahu App Token and Akahu User Token custom fields to connect to Akahu.`
+            "Visit Settings > Business Details and fill out the Akahu App Token and Akahu User Token fields. Once you've done that, come back to this page."
           }
         />
       )
