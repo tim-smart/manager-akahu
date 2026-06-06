@@ -44,11 +44,6 @@ const makeIframeHttpClient = Effect.gen(function* () {
       const deferred = Deferred.makeUnsafe<Response>()
       deferreds.set(requestId, deferred)
 
-      yield* Effect.log({
-        request,
-        requestId,
-      })
-
       window.parent.postMessage(
         {
           type: "api-request",
