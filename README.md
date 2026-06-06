@@ -1,29 +1,11 @@
-# Vite+ Monorepo Starter
+# Manager + Akahu bank sync
 
-A starter for creating a Vite+ monorepo.
+An extension for [Manager](https://manager.io) that syncs your NZ bank accounts with [Akahu](https://akahu.nz).
 
-## Development
+## Docker image
 
-- Check everything is ready:
+The docker image is available on [Docker Hub](https://hub.docker.com/r/timsmart/manager-akahu).
 
-```bash
-vp run ready
 ```
-
-- Run the tests:
-
-```bash
-vp run test -r
-```
-
-- Build the monorepo:
-
-```bash
-vp run build -r
-```
-
-- Run the development server:
-
-```bash
-vp run dev
+docker run -d -p 3000:3000 timsmart/manager-akahu:master
 ```
