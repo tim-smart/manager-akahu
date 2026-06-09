@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Redacted, Stream } from "effect"
+import { Context, DateTime, Effect, Layer, Option, Redacted, Stream } from "effect"
 import {
   Account,
   AccountId,
@@ -24,10 +24,14 @@ const paginatedAkahuItems = <A, E, R>(
     ),
   )
 
-const settledTransactionHistoryQuery = (cursor: string | undefined) => ({
+const settledTransactionHistoryQuery = (
+  cursor: string | undefined,
+  start: DateTime.Utc | undefined,
+) => ({
   // Akahu's account transaction endpoint defaults to the full app-accessible
   // settled history when start/end are omitted; keep sync history cursor-only.
   cursor,
+  ...(start === undefined ? {} : { start }),
 })
 
 export class AkahuCredentials extends Context.Service<
@@ -44,6 +48,7 @@ export class Akahu extends Context.Service<
     readonly accounts: Effect.Effect<ReadonlyArray<Account>, AkahuRpcError, AkahuCredentials>
     transactions(options: {
       readonly accountId: AccountId
+      readonly start?: DateTime.Utc | undefined
     }): Stream.Stream<Transaction, AkahuRpcError, AkahuCredentials>
     pendingTransactions(options: {
       readonly accountId: AccountId
@@ -83,11 +88,11 @@ export class Akahu extends Context.Service<
           Effect.map((items): ReadonlyArray<Account> => Array.from(items)),
           Effect.mapError(mapAkahuRpcError),
         ),
-        transactions: ({ accountId }) =>
+        transactions: ({ accountId, start }) =>
           paginatedAkahuItems((cursor) =>
             akahu.transactions.list({
               params: { accountId },
-              query: settledTransactionHistoryQuery(cursor),
+              query: settledTransactionHistoryQuery(cursor, start),
             }),
           ).pipe(Stream.mapError(mapAkahuRpcError)),
         pendingTransactions: ({ accountId }) =>

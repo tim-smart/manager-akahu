@@ -1,7 +1,7 @@
 import { Account, AccountId } from "@app/domain/Akahu"
 import { LinkedAccount } from "@app/domain/Manager/AkahuCustomFields"
 import { emptyManagerAkahuSyncSummaryCounts } from "@app/manager-api/ManagerAkahuTransactionSync"
-import { DateTime, Schema } from "effect"
+import { DateTime, Option, Schema } from "effect"
 import { expect, it } from "@effect/vitest"
 import type { ManagerAkahuTransactionSyncSummary } from "../src/Manager/SyncFlows.ts"
 import {
@@ -39,6 +39,7 @@ const linkedAccount = () =>
     name: "Manager Checking",
     currency: null,
     canHavePendingTransactions: true,
+    akahuStartDate: Option.none(),
     akahuAccount,
     transferRules: [],
     transferRuleWarnings: [],

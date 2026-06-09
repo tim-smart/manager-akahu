@@ -8,6 +8,8 @@ import type {
 } from "../src/index.ts"
 import {
   addManagerAkahuSyncSummaryCounts,
+  decideAkahuDateTimeStartDateEligibility,
+  decideManagerItemDateStartDateEligibility,
   buildAkahuPendingTransactionFingerprint,
   buildAkahuPendingTransferFingerprint,
   buildManagerAkahuInterAccountTransferPayload,
@@ -15,6 +17,7 @@ import {
   buildManagerBankOrCashAccountSyncRead,
   classifyManagerAkahuInterAccountTransfer,
   classifyManagerAkahuSuspenseImport,
+  decideManagerAkahuTransactionStartDateEligibility,
   decidePendingExactFingerprint,
   decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
@@ -485,6 +488,69 @@ test("skips transfer imports for zero amounts, invalid amounts, foreign destinat
     warning:
       "Skipping pending transfer to Destination Account: Manager account does not support pending transactions.",
   })
+})
+
+test("treats same-date transactions as eligible for configured Akahu start date", () => {
+  expect(
+    decideManagerAkahuTransactionStartDateEligibility({
+      transactionDate: DateTime.makeZonedUnsafe("2026-06-04"),
+      startDate: DateTime.makeUnsafe("2026-06-04"),
+    }),
+  ).toEqual({ _tag: "eligible" })
+})
+
+test("treats newer transactions as eligible for configured Akahu start date", () => {
+  expect(
+    decideManagerAkahuTransactionStartDateEligibility({
+      transactionDate: DateTime.makeZonedUnsafe("2026-06-05"),
+      startDate: DateTime.makeUnsafe("2026-06-04"),
+    }),
+  ).toEqual({ _tag: "eligible" })
+})
+
+test("treats older transactions as ineligible for configured Akahu start date", () => {
+  expect(
+    decideManagerAkahuTransactionStartDateEligibility({
+      transactionDate: DateTime.makeZonedUnsafe("2026-06-03"),
+      startDate: DateTime.makeUnsafe("2026-06-04"),
+    }),
+  ).toEqual({ _tag: "ineligible" })
+})
+
+test("preserves no-start pass-through eligibility without parsing transaction dates", () => {
+  expect(
+    decideManagerItemDateStartDateEligibility({
+      itemDate: "not-a-manager-date",
+    }),
+  ).toEqual({ _tag: "eligible" })
+})
+
+test("adapts Akahu DateTime values through timezone-stable calendar formatting", () => {
+  const nearMidnightAuckland = DateTime.makeUnsafe("2026-06-04T11:30:00.000Z").pipe(
+    DateTime.setZoneNamedUnsafe("Pacific/Auckland"),
+  )
+
+  expect(
+    buildAkahuPendingTransactionFingerprint({
+      akahuAccountId: "akahu-account-1",
+      date: nearMidnightAuckland,
+      amount: "1.00",
+      description: "Near Midnight",
+    }),
+  ).toMatchObject({ _tag: "fingerprint", date: "2026-06-04" })
+
+  expect(
+    decideAkahuDateTimeStartDateEligibility({
+      transactionDate: nearMidnightAuckland,
+      startDate: DateTime.makeUnsafe("2026-06-04"),
+    }),
+  ).toEqual({ _tag: "eligible" })
+  expect(
+    decideAkahuDateTimeStartDateEligibility({
+      transactionDate: nearMidnightAuckland,
+      startDate: DateTime.makeUnsafe("2026-06-05"),
+    }),
+  ).toEqual({ _tag: "ineligible" })
 })
 
 test("uses the canonical Manager sync-read fdxTransactionId entries and index", () => {
@@ -1002,6 +1068,40 @@ test("decides stale Akahu-created pending transfer entries absent from current p
   ).toEqual(["transfer-stale-credit:credit", "transfer-stale-debit:debit"])
 })
 
+test("filters pre-start stale pending entries while keeping malformed dates conservative", () => {
+  const preStartFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-03:8.50:pre start`
+  const staleFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:8.50:stale`
+  const malformedDateFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:8.50:bad date`
+  const syncRead = managerSyncRead({
+    receipts: [
+      pendingReceipt("receipt-pre-start", {
+        fdxTransactionId: preStartFingerprint,
+        date: "2026-06-03",
+        description: "Pre Start",
+      }),
+      pendingReceipt("receipt-stale", {
+        fdxTransactionId: staleFingerprint,
+        date: "2026-06-04",
+        description: "Stale",
+      }),
+      pendingReceipt("receipt-bad-date", {
+        fdxTransactionId: malformedDateFingerprint,
+        date: "2026-02-30",
+        description: "Bad Date",
+      }),
+    ],
+  })
+
+  expect(
+    decideStalePendingEntries({
+      syncRead,
+      currentPendingFdxTransactionIds: new Set(),
+      processedFdxTransactionIds: new Set(),
+      startDate: DateTime.makeUnsafe("2026-06-04"),
+    }).map((entry) => entry.key),
+  ).toEqual(["receipt-stale"])
+})
+
 test("safely matches exactly one pending candidate to a settled transaction", () => {
   const syncRead = managerSyncRead({
     receipts: [
@@ -1099,6 +1199,79 @@ test("excludes unavailable pending candidates from pending-to-settled matching",
       excludedFdxTransactionIds: new Set(["other-fingerprint"]),
     })._tag,
   ).toBe("match")
+})
+
+test("excludes pre-start pending candidates from pending-to-settled matching", () => {
+  const syncRead = managerSyncRead({
+    receipts: [
+      pendingReceipt("receipt-pre-start", {
+        date: "2026-06-03",
+        amount: "12.34",
+        description: "Coffee Shop",
+      }),
+    ],
+  })
+  const input = {
+    syncRead,
+    settledDate: DateTime.makeUnsafe("2026-06-04"),
+    settledSignedAmount: "12.34",
+    settledDescription: "coffee shop",
+    excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
+  }
+
+  expect(decidePendingToSettledMatch(input)._tag).toBe("match")
+  expect(
+    decidePendingToSettledMatch({
+      ...input,
+      startDate: DateTime.makeUnsafe("2026-06-04"),
+    }),
+  ).toEqual({ _tag: "none" })
+})
+
+test("matches near-midnight pending-to-settled candidates through canonical calendar dates", () => {
+  const nearMidnightAuckland = DateTime.makeUnsafe("2026-06-04T11:30:00.000Z").pipe(
+    DateTime.setZoneNamedUnsafe("Pacific/Auckland"),
+  )
+  const nearMidnightFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:12.34:near midnight`
+  const syncRead = managerSyncRead({
+    receipts: [
+      pendingReceipt("receipt-near-midnight", {
+        fdxTransactionId: nearMidnightFingerprint,
+        date: "2026-06-04",
+        amount: "12.34",
+        description: "Near Midnight",
+      }),
+      pendingReceipt("receipt-outside-window", {
+        fdxTransactionId: `${managerAkahuPendingFingerprintPrefix}acc:2026-06-08:12.34:near midnight`,
+        date: "2026-06-08",
+        amount: "12.34",
+        description: "Near Midnight",
+      }),
+    ],
+  })
+
+  expect(
+    buildAkahuPendingTransactionFingerprint({
+      akahuAccountId: "acc",
+      date: nearMidnightAuckland,
+      amount: "12.34",
+      description: "Near Midnight",
+    }),
+  ).toMatchObject({ _tag: "fingerprint", date: "2026-06-04" })
+
+  const decision = decidePendingToSettledMatch({
+    syncRead,
+    settledDate: nearMidnightAuckland,
+    settledSignedAmount: "12.34",
+    settledDescription: "near midnight",
+    excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
+  })
+
+  expect(decision._tag).toBe("match")
+  if (decision._tag !== "match") {
+    throw new Error(`Expected match, got ${decision._tag}`)
+  }
+  expect(decision.entry.key).toBe("receipt-near-midnight")
 })
 
 test("accumulates all sync summary counts", () => {

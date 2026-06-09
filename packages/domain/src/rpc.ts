@@ -22,6 +22,7 @@ export class AccountTransactions extends Rpc.make("AccountTransactions", {
     akahuAppToken: Schema.Redacted(Schema.String),
     akahuUserToken: Schema.Redacted(Schema.String),
     accountId: AccountId,
+    start: Schema.optional(Schema.DateTimeUtc),
   },
   success: Transaction,
   error: AkahuRpcError,

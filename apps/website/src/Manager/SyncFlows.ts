@@ -16,6 +16,7 @@ import {
   buildManagerAkahuSettledMirroredTransferUpdatePayload,
   classifyManagerAkahuInterAccountTransfer,
   classifyManagerAkahuSuspenseImport,
+  decideAkahuDateTimeStartDateEligibility,
   decidePendingExactFingerprint,
   decidePendingTransferToSettledMatch,
   decidePendingToSettledMatch,
@@ -43,7 +44,7 @@ import {
   type ManagerSuspenseReceiptValue,
 } from "@app/manager-api/ManagerCompatibility"
 import type { Client } from "@app/manager-api/ManagerClient"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
+import { Context, DateTime, Effect, Layer, Option, Schema, Stream } from "effect"
 import {
   decodeManagerAkahuBusinessDetailTokens,
   findManagerAkahuCredentialFields,
@@ -67,6 +68,7 @@ export interface ManagerAkahuSettledTransactionRequest {
   readonly akahuAppToken: AkahuTokens["akahuAppToken"]
   readonly akahuUserToken: AkahuTokens["akahuUserToken"]
   readonly accountId: AccountId
+  readonly start: DateTime.Utc | undefined
 }
 
 export interface ManagerAkahuPendingTransactionRequest {
@@ -331,7 +333,9 @@ const syncManagerAkahuUnsupportedAccount = Effect.fn("syncManagerAkahuUnsupporte
         akahuAppToken: input.tokens.akahuAppToken,
         akahuUserToken: input.tokens.akahuUserToken,
         accountId: account.akahuAccount._id,
+        start: Option.getOrUndefined(account.akahuStartDate),
       }),
+      startDate: getManagerAkahuLinkedAccountStartDate(account),
       fetchedCount: "settledFetched",
     })
     state = settledResult.state
@@ -344,6 +348,7 @@ const syncManagerAkahuUnsupportedAccount = Effect.fn("syncManagerAkahuUnsupporte
           akahuUserToken: input.tokens.akahuUserToken,
           accountId: account.akahuAccount._id,
         }),
+        startDate: getManagerAkahuLinkedAccountStartDate(account),
         fetchedCount: "pendingFetched",
       })).state
     }
@@ -356,15 +361,19 @@ const syncManagerAkahuUnsupportedAccountSummaryPhase = Effect.fn(
   "syncManagerAkahuUnsupportedAccountSummaryPhase",
 )(function* <A>(input: {
   readonly state: ManagerAkahuTransactionSyncAccountState
-  readonly stream: Stream.Stream<A, unknown>
+  readonly stream: Stream.Stream<A & { readonly date: DateTime.DateTime }, unknown>
+  readonly startDate: DateTime.Utc | undefined
   readonly fetchedCount: "settledFetched" | "pendingFetched"
 }) {
   let state = input.state
   let failed = false
 
   yield* input.stream.pipe(
-    Stream.runForEach(() =>
+    Stream.runForEach((transaction) =>
       Effect.sync(() => {
+        if (!isManagerAkahuTransactionEligibleForStartDate(transaction.date, input.startDate)) {
+          return
+        }
         state = incrementManagerAkahuTransactionSyncAccountCount(state, input.fetchedCount)
         state = incrementManagerAkahuTransactionSyncAccountCount(state, "unsupportedSkipped")
       }),
@@ -429,6 +438,7 @@ const refreshManagerAkahuTransferRuleAccounts = Effect.fn(
     return {
       account: new LinkedAccount({
         ...sourceAccount,
+        akahuStartDate: account.akahuStartDate,
         akahuAccount: account.akahuAccount,
         transferRules: transferRulesResult.rules,
         transferRuleWarnings: transferRulesResult.warnings,
@@ -447,6 +457,7 @@ const buildManagerAkahuRefreshedAccountWithoutTransferRules = (input: {
     name: input.account.name,
     currency: input.account.currency,
     canHavePendingTransactions: input.account.canHavePendingTransactions,
+    akahuStartDate: input.account.akahuStartDate,
     akahuAccount: input.account.akahuAccount,
     transferRules: [],
     transferRuleWarnings: [input.warning],
@@ -486,6 +497,7 @@ const syncManagerAkahuSettledTransactionPhase = Effect.fn(
       akahuAppToken: input.input.tokens.akahuAppToken,
       akahuUserToken: input.input.tokens.akahuUserToken,
       accountId: input.context.account.akahuAccount._id,
+      start: Option.getOrUndefined(input.context.account.akahuStartDate),
     })
     .pipe(
       Stream.takeUntilEffect((transaction) =>
@@ -537,6 +549,19 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
     .pipe(
       Stream.runForEach((transaction) =>
         Effect.gen(function* () {
+          const startDate = getManagerAkahuLinkedAccountStartDate(input.context.account)
+          if (!isManagerAkahuTransactionEligibleForStartDate(transaction.date, startDate)) {
+            return
+          }
+          const fingerprintDecision = buildAkahuPendingTransactionFingerprint({
+            akahuAccountId: input.context.account.akahuAccount._id,
+            date: transaction.date,
+            amount: transaction.amount,
+            description: transaction.description,
+          })
+          if (fingerprintDecision._tag === "fingerprint") {
+            currentPendingFdxTransactionIds.add(fingerprintDecision.fingerprint)
+          }
           state = yield* processManagerAkahuPendingTransaction({
             context: input.context,
             state,
@@ -559,6 +584,7 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
       syncRead: input.context.syncRead,
       currentPendingFdxTransactionIds,
       currentPendingTransferFdxTransactionIds,
+      startDate: getManagerAkahuLinkedAccountStartDate(input.context.account),
     })
   }
 
@@ -573,6 +599,11 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
   }) {
     const { client, syncRead } = input.context
     const transaction = input.transaction
+    const startDate = getManagerAkahuLinkedAccountStartDate(input.context.account)
+    if (!isManagerAkahuTransactionEligibleForStartDate(transaction.date, startDate)) {
+      return continueManagerAkahuSettledPhase(input.state)
+    }
+
     let accountState = incrementManagerAkahuTransactionSyncAccountCount(
       input.state.accountState,
       "settledFetched",
@@ -677,6 +708,7 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
             settledSignedAmount: transaction.amount,
             settledDescription: getAkahuTransactionDescription(transaction),
             excludedFdxTransactionIds: state.accountState.processedFdxTransactionIds,
+            startDate,
           })
 
           if (pendingReplacementDecision._tag === "match") {
@@ -1398,6 +1430,7 @@ const detectManagerAkahuStalePendingEntries = (input: {
   readonly syncRead: ManagerBankOrCashAccountSyncRead
   readonly currentPendingFdxTransactionIds: ReadonlySet<string>
   readonly currentPendingTransferFdxTransactionIds: ReadonlySet<string>
+  readonly startDate: DateTime.Utc | undefined
 }): ManagerAkahuTransactionSyncAccountState => {
   let state = input.state
 
@@ -1405,6 +1438,7 @@ const detectManagerAkahuStalePendingEntries = (input: {
     syncRead: input.syncRead,
     currentPendingFdxTransactionIds: input.currentPendingFdxTransactionIds,
     processedFdxTransactionIds: state.processedFdxTransactionIds,
+    startDate: input.startDate,
   })) {
     state = addManagerAkahuTransactionSyncAccountWarning(
       state,
@@ -1418,6 +1452,7 @@ const detectManagerAkahuStalePendingEntries = (input: {
     syncRead: input.syncRead,
     currentPendingFdxTransactionIds: input.currentPendingTransferFdxTransactionIds,
     processedFdxTransactionIds: state.processedFdxTransactionIds,
+    startDate: input.startDate,
   })) {
     state = addManagerAkahuTransactionSyncAccountWarning(
       state,
@@ -1538,6 +1573,15 @@ const buildManagerAkahuTransactionSyncAccountErrorSummary = (
 
 const getAkahuTransactionDescription = (transaction: Transaction): string =>
   transaction.merchant?.name ?? transaction.description
+
+const getManagerAkahuLinkedAccountStartDate = (account: LinkedAccount): DateTime.Utc | undefined =>
+  Option.getOrUndefined(account.akahuStartDate)
+
+const isManagerAkahuTransactionEligibleForStartDate = (
+  transactionDate: DateTime.DateTime,
+  startDate: DateTime.Utc | undefined,
+): boolean =>
+  decideAkahuDateTimeStartDateEligibility({ transactionDate, startDate })._tag === "eligible"
 
 const formatSyncError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
