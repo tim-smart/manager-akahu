@@ -40,6 +40,8 @@ type ManagerAkahuAccountRecord = {
 
 export const managerAkahuAccountFieldName = "Akahu Account"
 export const managerAkahuTransferRulesFieldName = "Akahu Transfer Rules"
+export const managerAkahuTransferRulesFieldDescription =
+  "One rule per line: keyword,destination account key. Matching Akahu transactions become transfers to that Manager bank/cash account."
 export const managerAkahuStartDateFieldName = "Akahu Start Date"
 export const managerBankOrCashAccountCustomFieldPlacementKey =
   "1408c33b-6284-4f50-9e31-48cbea21f3cf"
@@ -64,6 +66,7 @@ type EnsureManagerBankOrCashAccountTextFieldOptions = {
   readonly name: string
   readonly type: number
   readonly placement: ReadonlyArray<string>
+  readonly description?: string | undefined
   readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
 }
 
@@ -98,14 +101,22 @@ const makeManagerBankOrCashAccountTextFieldPayload = (options: {
   readonly name: string
   readonly type: number
   readonly placement: ReadonlyArray<string>
+  readonly description?: string | undefined
   readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
 }): TextCustomField => {
-  const payload: TextCustomField = {
+  let payload: TextCustomField = {
     name: options.name,
     type: options.type,
     placement: [...options.placement],
     excludeFromCopyingOrCloning: true,
     size: 2,
+  }
+
+  if (options.description !== undefined) {
+    payload = {
+      ...payload,
+      description: options.description,
+    }
   }
 
   if (options.optionsForDropdownList !== undefined) {
@@ -124,6 +135,7 @@ const isManagerBankOrCashAccountTextFieldCurrent = (
 ) =>
   field.type === desired.type &&
   sameStringSet(field.placement ?? [], desired.placement ?? []) &&
+  (desired.description === undefined || field.description === desired.description) &&
   (desired.optionsForDropdownList === undefined ||
     field.optionsForDropdownList === desired.optionsForDropdownList)
 
@@ -351,6 +363,7 @@ export class ManagerFlows extends Context.Service<
           getCurrentFields: () => Resource.get(textFields),
           refreshFields: () => Resource.refresh(textFields),
           name: managerAkahuTransferRulesFieldName,
+          description: managerAkahuTransferRulesFieldDescription,
           type: managerMultilineTextCustomFieldType,
           placement: managerBankOrCashAccountCustomFieldPlacement,
         })

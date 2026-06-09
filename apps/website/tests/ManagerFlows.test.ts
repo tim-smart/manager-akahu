@@ -9,6 +9,7 @@ import {
   ensureManagerBankOrCashAccountTextField,
   isManagerAkahuTransferRulesFieldCurrent,
   managerAkahuAccountFieldName,
+  managerAkahuTransferRulesFieldDescription,
   managerAkahuTransferRulesFieldName,
   mapAkahuAccountsReadFailure,
 } from "../src/Manager/Flows.ts"
@@ -62,6 +63,7 @@ const makeTextCustomFieldEnsureHarness = (initialFields: ReadonlyArray<ItemOfTex
       readonly name: string
       readonly type: number
       readonly placement: ReadonlyArray<string>
+      readonly description?: string | undefined
       readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
     }) =>
       ensureManagerBankOrCashAccountTextField({
@@ -292,6 +294,7 @@ it.effect("creates missing Akahu Transfer Rules as a multiline bank/cash account
 
     const field = yield* harness.ensure({
       name: managerAkahuTransferRulesFieldName,
+      description: managerAkahuTransferRulesFieldDescription,
       type: 1,
       placement: managerBankOrCashAccountPlacement,
     })
@@ -300,6 +303,7 @@ it.effect("creates missing Akahu Transfer Rules as a multiline bank/cash account
     expect(harness.postPayloads).toEqual([
       {
         name: managerAkahuTransferRulesFieldName,
+        description: managerAkahuTransferRulesFieldDescription,
         type: 1,
         placement: [...managerBankOrCashAccountPlacement],
         excludeFromCopyingOrCloning: true,
@@ -340,6 +344,7 @@ it.effect("repairs wrong-type transfer-rule fields without carrying dropdown opt
 
     const field = yield* harness.ensure({
       name: managerAkahuTransferRulesFieldName,
+      description: managerAkahuTransferRulesFieldDescription,
       type: 1,
       placement: managerBankOrCashAccountPlacement,
     })
@@ -350,6 +355,7 @@ it.effect("repairs wrong-type transfer-rule fields without carrying dropdown opt
         key: "transfer-rules-field",
         value: {
           name: managerAkahuTransferRulesFieldName,
+          description: managerAkahuTransferRulesFieldDescription,
           type: 1,
           placement: [...managerBankOrCashAccountPlacement],
           excludeFromCopyingOrCloning: true,
@@ -384,6 +390,7 @@ it.effect("repairs wrong-placement transfer-rule fields in place", () =>
 
     const field = yield* harness.ensure({
       name: managerAkahuTransferRulesFieldName,
+      description: managerAkahuTransferRulesFieldDescription,
       type: 1,
       placement: managerBankOrCashAccountPlacement,
     })
@@ -394,6 +401,41 @@ it.effect("repairs wrong-placement transfer-rule fields in place", () =>
         key: "transfer-rules-field",
         value: {
           name: managerAkahuTransferRulesFieldName,
+          description: managerAkahuTransferRulesFieldDescription,
+          type: 1,
+          placement: [...managerBankOrCashAccountPlacement],
+          excludeFromCopyingOrCloning: true,
+          size: 2,
+        },
+      },
+    ])
+  }),
+)
+
+it.effect("adds the transfer-rule description to otherwise current fields", () =>
+  Effect.gen(function* () {
+    const harness = makeTextCustomFieldEnsureHarness([
+      makeTextCustomField("transfer-rules-field", {
+        name: managerAkahuTransferRulesFieldName,
+        type: 1,
+        placement: [...managerBankOrCashAccountPlacement],
+      }),
+    ])
+
+    const field = yield* harness.ensure({
+      name: managerAkahuTransferRulesFieldName,
+      description: managerAkahuTransferRulesFieldDescription,
+      type: 1,
+      placement: managerBankOrCashAccountPlacement,
+    })
+
+    expect(field.key).toBe("transfer-rules-field")
+    expect(harness.putPayloads).toEqual([
+      {
+        key: "transfer-rules-field",
+        value: {
+          name: managerAkahuTransferRulesFieldName,
+          description: managerAkahuTransferRulesFieldDescription,
           type: 1,
           placement: [...managerBankOrCashAccountPlacement],
           excludeFromCopyingOrCloning: true,
