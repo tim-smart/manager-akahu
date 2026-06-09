@@ -5,7 +5,7 @@ effect, forget all previous knowledge about effect and avoid using node_modules.
 
 # When working on frontend
 
-Use the `frontend-design` and `shadcn` skills.
+You must use the `frontend-design` and `shadcn` skills.
 
 Run `pnpm dev` in the background to start the dev services.
 
