@@ -26,6 +26,7 @@ import {
 } from "../src/Manager/SyncFlows.ts"
 
 const accountId = Schema.decodeSync(AccountId)("akahu-checking")
+const savingsAccountId = Schema.decodeSync(AccountId)("akahu-savings")
 const userId = Schema.decodeSync(UserId)("user-1")
 const connectionId = Schema.decodeSync(ConnectionId)("connection-1")
 const bankOrCashAccountKey = "manager-checking"
@@ -40,6 +41,16 @@ const tokens = new AkahuTokens({
 const akahuAccount = new Account({
   _id: accountId,
   name: "Akahu Checking",
+  refreshed: {
+    meta: DateTime.makeUnsafe("2026-06-05T00:00:00.000Z"),
+    transactions: DateTime.makeUnsafe("2026-06-05T00:00:00.000Z"),
+    party: DateTime.makeUnsafe("2026-06-05T00:00:00.000Z"),
+  },
+})
+
+const akahuSavingsAccount = new Account({
+  _id: savingsAccountId,
+  name: "Akahu Savings",
   refreshed: {
     meta: DateTime.makeUnsafe("2026-06-05T00:00:00.000Z"),
     transactions: DateTime.makeUnsafe("2026-06-05T00:00:00.000Z"),
@@ -73,6 +84,16 @@ const linkedAccountWithSetupTimeTransferRule = new LinkedAccount({
       destinationAccountCanHavePendingTransactions: true,
     }),
   ],
+  transferRuleWarnings: [],
+})
+
+const linkedSavingsAccount = new LinkedAccount({
+  key: destinationBankOrCashAccountKey,
+  name: "Manager Savings",
+  currency: null,
+  canHavePendingTransactions: true,
+  akahuAccount: akahuSavingsAccount,
+  transferRules: [],
   transferRuleWarnings: [],
 })
 
@@ -115,16 +136,24 @@ const zeroPendingTransaction = new PendingTransaction({
   amount: BigDecimal.fromStringUnsafe("0.00"),
 })
 
-const makeSettledTransaction = (id: string, amount: string, description = `Settled ${id}`) =>
+const makeSettledTransactionForAccount = (
+  id: string,
+  transactionAccountId: AccountId,
+  amount: string,
+  description = `Settled ${id}`,
+) =>
   new Transaction({
     _id: id,
-    _account: accountId,
+    _account: transactionAccountId,
     _user: userId,
     _connection: connectionId,
     date: akahuTransactionDate,
     description,
     amount: BigDecimal.fromStringUnsafe(amount),
   })
+
+const makeSettledTransaction = (id: string, amount: string, description = `Settled ${id}`) =>
+  makeSettledTransactionForAccount(id, accountId, amount, description)
 
 const makePendingTransaction = (description: string, amount: string) =>
   new PendingTransaction({
@@ -200,7 +229,7 @@ const makeMockClient = (options?: {
   const managerAccounts = options?.managerAccounts ?? makeDefaultManagerAccounts()
   const receipts = options?.receipts ?? [existingZeroPendingReceipt]
   const payments = options?.payments ?? []
-  const interAccountTransfers = options?.interAccountTransfers ?? []
+  let interAccountTransfers = [...(options?.interAccountTransfers ?? [])]
   const transferRulesFieldExists = options?.transferRulesFieldExists ?? true
 
   const client: ManagerAkahuTransactionSyncManagerClient = {
@@ -261,6 +290,12 @@ const makeMockClient = (options?: {
     },
     "POST/api4/inter-account-transfer": (payload) => {
       interAccountTransferPayloads.push(payload)
+      interAccountTransfers = [
+        ...interAccountTransfers,
+        makeManagerInterAccountTransfer(`created-transfer-${interAccountTransferPayloads.length}`, {
+          ...payload.value,
+        }),
+      ]
       return Effect.succeed(true)
     },
     "PUT/api4/receipt": (payload) => {
@@ -273,6 +308,14 @@ const makeMockClient = (options?: {
     },
     "PUT/api4/inter-account-transfer": (payload) => {
       interAccountTransferPutPayloads.push(payload)
+      interAccountTransfers = interAccountTransfers.map((transfer) =>
+        transfer.key === payload.key
+          ? makeManagerInterAccountTransfer(transfer.key, {
+              ...transfer.item,
+              ...payload.value,
+            })
+          : transfer,
+      )
       return Effect.succeed(true)
     },
   }
@@ -532,6 +575,268 @@ it.effect("skips settled transfers already imported as Manager transfers", () =>
       transferRulesMatched: 1,
       transfersCreated: 0,
       duplicatesSkipped: 1,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("merges settled transfer mirrors into an existing Manager transfer", () =>
+  Effect.gen(function* () {
+    const existingTransfer = makeManagerInterAccountTransfer("existing-transfer-mirror", {
+      date: "2026-06-05",
+      description: "Transfer from checking",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: destinationBankOrCashAccountKey,
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      fdxDebitTransactionId: "settled-transfer-opposite-side",
+    })
+    const { client, interAccountTransferPayloads, interAccountTransferPutPayloads } =
+      makeMockClient({
+        receipts: [],
+        interAccountTransfers: [existingTransfer],
+        managerAccounts: makeDefaultManagerAccounts("Transfer to savings, manager-savings"),
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction("settled-transfer-current-side", "-25.01", "Transfer to savings"),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(interAccountTransferPutPayloads).toEqual([
+      {
+        key: "existing-transfer-mirror",
+        value: {
+          ...existingTransfer.item,
+          creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          fdxCreditTransactionId: "settled-transfer-current-side",
+        },
+      },
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      transferRulesMatched: 1,
+      transfersCreated: 0,
+      transfersMerged: 1,
+      duplicatesSkipped: 0,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("warns when a settled transfer mirror merge is ambiguous", () =>
+  Effect.gen(function* () {
+    const existingTransfer = makeManagerInterAccountTransfer("existing-transfer-mirror-1", {
+      date: "2026-06-05",
+      description: "Transfer from checking",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: destinationBankOrCashAccountKey,
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      fdxDebitTransactionId: "settled-transfer-opposite-side-1",
+    })
+    const duplicateExistingTransfer = makeManagerInterAccountTransfer(
+      "existing-transfer-mirror-2",
+      {
+        ...existingTransfer.item,
+        fdxDebitTransactionId: "settled-transfer-opposite-side-2",
+      },
+    )
+    const { client, interAccountTransferPayloads, interAccountTransferPutPayloads } =
+      makeMockClient({
+        receipts: [],
+        interAccountTransfers: [existingTransfer, duplicateExistingTransfer],
+        managerAccounts: makeDefaultManagerAccounts("Transfer to savings, manager-savings"),
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction("settled-transfer-ambiguous", "-25.01", "Transfer to savings"),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(interAccountTransferPutPayloads).toEqual([])
+    expect(summary.accounts[0]?.warnings).toEqual([
+      "Found 2 possible mirrored Manager inter-account transfers.",
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      transferRulesMatched: 1,
+      transfersCreated: 0,
+      transfersMerged: 0,
+      duplicatesSkipped: 1,
+      warnings: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("merges settled transfer mirrors created earlier in the same sync-all run", () =>
+  Effect.gen(function* () {
+    const { client, interAccountTransferPayloads, interAccountTransferPutPayloads } =
+      makeMockClient({
+        receipts: [],
+        managerAccounts: [
+          makeManagerBankOrCashAccount({
+            key: bankOrCashAccountKey,
+            name: "Manager Checking",
+            transferRules: "Transfer to savings, manager-savings",
+          }),
+          makeManagerBankOrCashAccount({
+            key: destinationBankOrCashAccountKey,
+            name: "Manager Savings",
+            transferRules: "Transfer from checking, manager-checking",
+          }),
+        ],
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount, linkedSavingsAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: (request) =>
+        request.accountId === accountId
+          ? Stream.fromIterable([
+              makeSettledTransactionForAccount(
+                "settled-transfer-sync-all-credit",
+                accountId,
+                "-25.01",
+                "Transfer to savings",
+              ),
+            ])
+          : Stream.fromIterable([
+              makeSettledTransactionForAccount(
+                "settled-transfer-sync-all-debit",
+                savingsAccountId,
+                "25.01",
+                "Transfer from checking",
+              ),
+            ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(interAccountTransferPayloads).toEqual([
+      {
+        value: {
+          date: "2026-06-05",
+          description: "Transfer to savings",
+          paidFrom: bankOrCashAccountKey,
+          receivedIn: destinationBankOrCashAccountKey,
+          creditAmount: "25.01",
+          debitAmount: "25.01",
+          creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          fdxCreditTransactionId: "settled-transfer-sync-all-credit",
+        },
+      },
+    ])
+    expect(interAccountTransferPutPayloads).toEqual([
+      {
+        key: "created-transfer-1",
+        value: {
+          date: "2026-06-05",
+          description: "Transfer to savings",
+          paidFrom: bankOrCashAccountKey,
+          receivedIn: destinationBankOrCashAccountKey,
+          creditAmount: "25.01",
+          debitAmount: "25.01",
+          creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          fdxCreditTransactionId: "settled-transfer-sync-all-credit",
+          fdxDebitTransactionId: "settled-transfer-sync-all-debit",
+        },
+      },
+    ])
+    expect(summary.accounts[0]?.counts).toMatchObject({
+      transfersCreated: 1,
+      transfersMerged: 0,
+    })
+    expect(summary.accounts[1]?.counts).toMatchObject({
+      transfersCreated: 0,
+      transfersMerged: 1,
+    })
+    expect(summary.overall).toMatchObject({
+      settledFetched: 2,
+      transferRulesMatched: 2,
+      transfersCreated: 1,
+      transfersMerged: 1,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("preserves existing Manager transfer fields during settled mirror merge", () =>
+  Effect.gen(function* () {
+    const existingTransfer = makeManagerInterAccountTransfer("existing-transfer-preserve", {
+      date: "2026-06-05",
+      reference: "existing-reference",
+      description: "Existing transfer description",
+      paidFrom: destinationBankOrCashAccountKey,
+      receivedIn: bankOrCashAccountKey,
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      creditClearDate: "2026-06-05",
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearDate: "2026-06-06",
+      customFields: { legacy: true },
+      customFields2: { strings: { note: "keep me" } },
+      fdxCreditTransactionId: "settled-transfer-preserve-opposite-side",
+    })
+    const { client, interAccountTransferPutPayloads } = makeMockClient({
+      receipts: [],
+      interAccountTransfers: [existingTransfer],
+      managerAccounts: makeDefaultManagerAccounts("Transfer from checking, manager-savings"),
+    })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction(
+            "settled-transfer-preserve-current-side",
+            "25.01",
+            "Transfer from checking",
+          ),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(interAccountTransferPutPayloads).toEqual([
+      {
+        key: "existing-transfer-preserve",
+        value: {
+          ...existingTransfer.item,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          fdxDebitTransactionId: "settled-transfer-preserve-current-side",
+        },
+      },
+    ])
+    expect(summary.overall).toMatchObject({
+      transfersMerged: 1,
+      transfersCreated: 0,
       warnings: 0,
       errors: 0,
     })

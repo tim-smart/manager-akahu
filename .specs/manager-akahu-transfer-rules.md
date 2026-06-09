@@ -386,11 +386,19 @@ Status: Completed.
 
 ### Task 7: Wire Settled Mirror Merge And Pending Replacement
 
+Status: In Progress.
+
 - Use the safe mirrored-candidate helper to update an existing Manager transfer with the current side FDX instead of creating a second transfer.
 - Preserve existing transfer fields when adding the missing current-side FDX.
 - Add settled-to-pending transfer replacement using the safe helper and pending-to-settled date-window policy.
 - Add tests for mirror merge, ambiguous merge warning, same-run mirror merge from sync-all, field preservation during merge, and settled replacement of a pending transfer.
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build`.
+- Completed: Settled transfer sync now updates exactly one safe mirrored Manager inter-account transfer candidate with the current-side settled FDX ID instead of creating a second transfer or skipping. The preserving update starts from the existing Manager transfer item and changes only the current-side FDX field plus the current-side settled clear status, then records the processed FDX ID and increments `transfersMerged`.
+- Completed: Ambiguous settled mirrored candidates now continue to skip with the pure helper's ambiguous merge warning surfaced through the account summary.
+- Completed: Website sync-flow tests cover successful settled mirror merge, ambiguous merge warning, same-run sync-all merge after an earlier account creates the opposite side, and field preservation during merge.
+- Discovery: Same-run sync-all mirror merging depends on later per-account sync reads seeing transfers created by earlier accounts in the same run. The focused test harness now records POST-created transfers in its mock batch read so this behavior is covered without adding cross-account in-memory sync state.
+- Remaining: settled-to-pending transfer replacement is not implemented in this step and still needs focused coverage.
+- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
 ### Task 8: Wire Pending Transfer Sync And Stale Detection
 

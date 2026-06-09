@@ -168,6 +168,10 @@ interface ManagerAkahuPaymentUpdatePayload {
   readonly value: ManagerSuspensePaymentValue
 }
 
+type ManagerAkahuInterAccountTransferUpdatePayload = Parameters<
+  ManagerAkahuTransactionSyncManagerClient["PUT/api4/inter-account-transfer"]
+>[0]
+
 interface ManagerAkahuTransactionSyncAccountContext {
   readonly account: LinkedAccount
   readonly client: ManagerAkahuTransactionSyncManagerClient
@@ -848,7 +852,13 @@ const processManagerAkahuSettledTransferTransaction = Effect.fn(
           })
           return continueManagerAkahuSettledPhase({ ...input.state, accountState })
         case "candidate":
-          accountState = addManagerAkahuTransactionSyncAccountDuplicateSkip(accountState)
+          accountState = yield* updateManagerAkahuSettledMirroredTransfer({
+            state: accountState,
+            client: input.client,
+            fdxTransactionId: input.transaction._id,
+            classification: input.classification,
+            candidate: mirrorDecision.candidate,
+          })
           return continueManagerAkahuSettledPhase({ ...input.state, accountState })
         case "ambiguous":
           accountState = addManagerAkahuTransactionSyncAccountWarningSkip(
@@ -860,11 +870,19 @@ const processManagerAkahuSettledTransferTransaction = Effect.fn(
       }
     }
     case "duplicate":
-    case "mirrorCandidate":
       return skipManagerAkahuSettledPhaseDuplicateOverlap({
         state: input.state,
         fdxTransactionId: input.transaction._id,
       })
+    case "mirrorCandidate":
+      accountState = yield* updateManagerAkahuSettledMirroredTransfer({
+        state: accountState,
+        client: input.client,
+        fdxTransactionId: input.transaction._id,
+        classification: input.classification,
+        candidate: duplicateDecision.entry.interAccountTransfer,
+      })
+      return continueManagerAkahuSettledPhase({ ...input.state, accountState })
     case "previouslyImportedAsSuspense":
     case "ambiguous":
       return skipManagerAkahuSettledPhaseDuplicateOverlap({
@@ -899,6 +917,58 @@ const createManagerAkahuTransfer = Effect.fn("createManagerAkahuTransfer")(funct
     successCounts: ["transfersCreated"],
   })
 })
+
+const updateManagerAkahuSettledMirroredTransfer = Effect.fn(
+  "updateManagerAkahuSettledMirroredTransfer",
+)(function* (input: {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly client: ManagerAkahuTransactionSyncManagerClient
+  readonly fdxTransactionId: string
+  readonly classification: ManagerAkahuTransferCreateClassification
+  readonly candidate: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+}) {
+  const writeResult = yield* input.client["PUT/api4/inter-account-transfer"](
+    buildManagerAkahuSettledMirroredTransferUpdatePayload(input),
+  ).pipe(
+    Effect.as({ _tag: "updated" as const }),
+    Effect.catch((error) =>
+      Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+    ),
+  )
+
+  if (writeResult._tag === "error") {
+    return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
+  }
+
+  return addManagerAkahuTransactionSyncAccountSuccessfulWrite(input.state, {
+    processedFdxTransactionIds: [input.fdxTransactionId],
+    successCounts: ["transfersMerged"],
+  })
+})
+
+const buildManagerAkahuSettledMirroredTransferUpdatePayload = (input: {
+  readonly fdxTransactionId: string
+  readonly classification: ManagerAkahuTransferCreateClassification
+  readonly candidate: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+}): ManagerAkahuInterAccountTransferUpdatePayload => {
+  const updateValue =
+    input.classification.sourceTransferSide === "credit"
+      ? {
+          ...input.candidate.item,
+          creditClearStatus: input.classification.payload.value.creditClearStatus,
+          fdxCreditTransactionId: input.fdxTransactionId,
+        }
+      : {
+          ...input.candidate.item,
+          debitClearStatus: input.classification.payload.value.debitClearStatus,
+          fdxDebitTransactionId: input.fdxTransactionId,
+        }
+
+  return {
+    key: input.candidate.key,
+    value: updateValue,
+  }
+}
 
 const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPendingTransaction")(
   function* (input: {
