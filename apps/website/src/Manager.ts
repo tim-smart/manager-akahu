@@ -15,6 +15,8 @@ export class Manager extends Context.Service<Manager, ManagerClient.Client>()("M
 const makeIframeHttpClient = Effect.gen(function* () {
   const deferreds = new Map<string, Deferred.Deferred<Response>>()
 
+  const context = yield* getPageContext
+
   const onMessage = (event: MessageEvent) => {
     if (!(event.data instanceof Object && "requestId" in event.data)) {
       return
@@ -50,6 +52,9 @@ const makeIframeHttpClient = Effect.gen(function* () {
           requestId,
           method: request.method,
           path: request.url,
+          headers: {
+            "Manager-Business": context.query.business,
+          },
           body:
             request.body._tag === "Uint8Array"
               ? // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -63,4 +68,24 @@ const makeIframeHttpClient = Effect.gen(function* () {
     }),
     Effect.succeed,
   )
+})
+
+const getPageContext = Effect.callback<{
+  readonly handler: string
+  readonly path: string
+  readonly query: {
+    readonly business: string
+  }
+}>((resume) => {
+  const onMessage = (event: MessageEvent) => {
+    if (event.data.type === "page-response") {
+      window.removeEventListener("message", onMessage)
+      resume(Exit.succeed(event.data.body))
+    }
+  }
+  window.addEventListener("message", onMessage)
+  window.parent.postMessage({ type: "page-request" }, "*")
+  return Effect.sync(() => {
+    window.addEventListener("message", onMessage)
+  })
 })
