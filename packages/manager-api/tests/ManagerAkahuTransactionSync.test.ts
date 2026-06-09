@@ -1,5 +1,6 @@
 import { BigDecimal, DateTime } from "effect"
 import { expect, test } from "@effect/vitest"
+import { LinkedAccountTransferRule } from "@app/domain/Manager/AkahuCustomFields"
 import type {
   ManagerInterAccountTransferItem,
   ManagerPaymentItem,
@@ -25,7 +26,6 @@ import {
   matchManagerAkahuTransferRule,
   normalizeAkahuTransactionDescription,
   normalizeManagerAkahuAmount,
-  type ManagerAkahuTransferRuleInput,
   ManagerBankAccountClearStatusValue,
 } from "../src/index.ts"
 
@@ -33,21 +33,20 @@ const bankOrCashAccountKey = "bank-1"
 
 const noExcludedFdxTransactionIds = (): ReadonlySet<string> => new Set()
 
-const transferRule = (
-  input: Partial<ManagerAkahuTransferRuleInput> = {},
-): ManagerAkahuTransferRuleInput => ({
-  sourceAccountKey: input.sourceAccountKey ?? bankOrCashAccountKey,
-  sourceAccountName: input.sourceAccountName ?? "Source Account",
-  sourceAccountCurrency: input.sourceAccountCurrency ?? null,
-  sourceAccountCanHavePendingTransactions: input.sourceAccountCanHavePendingTransactions ?? true,
-  keyword: input.keyword ?? "Transfer",
-  normalizedKeyword: input.normalizedKeyword ?? "transfer",
-  destinationAccountKey: input.destinationAccountKey ?? "bank-2",
-  destinationAccountName: input.destinationAccountName ?? "Destination Account",
-  destinationAccountCurrency: input.destinationAccountCurrency ?? null,
-  destinationAccountCanHavePendingTransactions:
-    input.destinationAccountCanHavePendingTransactions ?? true,
-})
+const transferRule = (input: Partial<LinkedAccountTransferRule> = {}): LinkedAccountTransferRule =>
+  new LinkedAccountTransferRule({
+    sourceAccountKey: input.sourceAccountKey ?? bankOrCashAccountKey,
+    sourceAccountName: input.sourceAccountName ?? "Source Account",
+    sourceAccountCurrency: input.sourceAccountCurrency ?? null,
+    sourceAccountCanHavePendingTransactions: input.sourceAccountCanHavePendingTransactions ?? true,
+    keyword: input.keyword ?? "Transfer",
+    normalizedKeyword: input.normalizedKeyword ?? "transfer",
+    destinationAccountKey: input.destinationAccountKey ?? "bank-2",
+    destinationAccountName: input.destinationAccountName ?? "Destination Account",
+    destinationAccountCurrency: input.destinationAccountCurrency ?? null,
+    destinationAccountCanHavePendingTransactions:
+      input.destinationAccountCanHavePendingTransactions ?? true,
+  })
 
 const receiptItem = (key: string, item: ManagerReceiptItem["item"]): ManagerReceiptItem => ({
   key,
@@ -248,7 +247,24 @@ test("matches transfer rules against normalized Akahu descriptions in field orde
     normalizedDescription: "paid at coffee shop today",
     rule: first,
     ignoredRules: [ignored],
-    warning: 'Transfer rule "Coffee Shop" matched first; 1 later matching rule(s) were ignored.',
+    overlapMatch: {
+      sourceAccountKey: bankOrCashAccountKey,
+      selectedRule: first,
+      ignoredRules: [ignored],
+      aggregationKey: JSON.stringify({
+        sourceAccountKey: bankOrCashAccountKey,
+        selectedRule: {
+          normalizedKeyword: "coffee shop",
+          destinationAccountKey: "bank-2",
+        },
+        ignoredRules: [
+          {
+            normalizedKeyword: "shop",
+            destinationAccountKey: "bank-3",
+          },
+        ],
+      }),
+    },
   })
 
   expect(
@@ -352,7 +368,7 @@ test("generates transfer-specific pending fingerprints with transfer rule contex
   expect(decision).toEqual({
     _tag: "fingerprint",
     fingerprint:
-      "akahu-transfer-pending:v1:akahu-account-1:bank-1:bank-2:2026-06-04:-20.01:loan payment:loan",
+      "akahu-transfer-pending:v1:akahu-account-1:bank-1:bank-2:2026-06-04:-20.01:loan%20payment:loan",
     date: "2026-06-04",
     normalizedAmount: "-20.01",
     normalizedDescription: "loan payment",
@@ -375,6 +391,41 @@ test("generates transfer-specific pending fingerprints with transfer rule contex
       rule: transferRule(),
     }),
   ).toEqual({ _tag: "unsupported", warning: "Unsupported pending transfer amount: not-a-decimal" })
+})
+
+test("encodes transfer pending fingerprint components so separators cannot collide", () => {
+  const commonInput = {
+    akahuAccountId: "akahu-account-1",
+    date: DateTime.makeUnsafe("2026-06-04"),
+    amount: "1.00",
+  }
+
+  const descriptionContainsSeparator = buildAkahuPendingTransferFingerprint({
+    ...commonInput,
+    description: "alpha:beta",
+    rule: transferRule({ keyword: "Gamma", normalizedKeyword: "gamma" }),
+  })
+  const keywordContainsSeparator = buildAkahuPendingTransferFingerprint({
+    ...commonInput,
+    description: "alpha",
+    rule: transferRule({ keyword: "Beta Gamma", normalizedKeyword: "beta:gamma" }),
+  })
+
+  expect(descriptionContainsSeparator._tag).toBe("fingerprint")
+  expect(keywordContainsSeparator._tag).toBe("fingerprint")
+  if (
+    descriptionContainsSeparator._tag !== "fingerprint" ||
+    keywordContainsSeparator._tag !== "fingerprint"
+  ) {
+    throw new Error("Expected supported transfer fingerprints")
+  }
+  expect(descriptionContainsSeparator.fingerprint).toBe(
+    "akahu-transfer-pending:v1:akahu-account-1:bank-1:bank-2:2026-06-04:1.00:alpha%3Abeta:gamma",
+  )
+  expect(keywordContainsSeparator.fingerprint).toBe(
+    "akahu-transfer-pending:v1:akahu-account-1:bank-1:bank-2:2026-06-04:1.00:alpha:beta%3Agamma",
+  )
+  expect(descriptionContainsSeparator.fingerprint).not.toBe(keywordContainsSeparator.fingerprint)
 })
 
 test("skips transfer imports for zero amounts, invalid amounts, foreign destinations, and pending capability gaps", () => {

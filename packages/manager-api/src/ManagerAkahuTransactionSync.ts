@@ -1,4 +1,9 @@
 import { BigDecimal, DateTime, Option } from "effect"
+import type { LinkedAccountTransferRule } from "@app/domain/Manager/AkahuCustomFields"
+import {
+  matchesAkahuTransferRuleDescription,
+  normalizeAkahuTransferRuleText,
+} from "@app/domain/Manager/AkahuCustomFields"
 import {
   buildManagerSuspenseImportDecision,
   type ManagerBankAccountCurrencyImportDecision,
@@ -89,17 +94,11 @@ export interface ManagerAkahuPendingFingerprintInput {
   readonly description: string
 }
 
-export interface ManagerAkahuTransferRuleInput {
+export interface ManagerAkahuTransferRuleOverlapMatch {
   readonly sourceAccountKey: string
-  readonly sourceAccountName: string
-  readonly sourceAccountCurrency: string | null
-  readonly sourceAccountCanHavePendingTransactions: boolean
-  readonly keyword: string
-  readonly normalizedKeyword: string
-  readonly destinationAccountKey: string
-  readonly destinationAccountName: string
-  readonly destinationAccountCurrency: string | null
-  readonly destinationAccountCanHavePendingTransactions: boolean
+  readonly selectedRule: LinkedAccountTransferRule
+  readonly ignoredRules: ReadonlyArray<LinkedAccountTransferRule>
+  readonly aggregationKey: string
 }
 
 export type ManagerAkahuTransferRuleMatchDecision =
@@ -107,9 +106,9 @@ export type ManagerAkahuTransferRuleMatchDecision =
   | {
       readonly _tag: "match"
       readonly normalizedDescription: string
-      readonly rule: ManagerAkahuTransferRuleInput
-      readonly ignoredRules: ReadonlyArray<ManagerAkahuTransferRuleInput>
-      readonly warning?: string | undefined
+      readonly rule: LinkedAccountTransferRule
+      readonly ignoredRules: ReadonlyArray<LinkedAccountTransferRule>
+      readonly overlapMatch?: ManagerAkahuTransferRuleOverlapMatch | undefined
     }
 
 export type ManagerAkahuTransferSourceSide = "credit" | "debit"
@@ -119,7 +118,7 @@ export interface ManagerAkahuPendingTransferFingerprintInput {
   readonly date: DateTime.DateTime
   readonly amount: ManagerAkahuDecimalInput
   readonly description: string
-  readonly rule: ManagerAkahuTransferRuleInput
+  readonly rule: LinkedAccountTransferRule
 }
 
 export type ManagerAkahuPendingTransferFingerprintDecision =
@@ -136,7 +135,7 @@ export type ManagerAkahuPendingTransferFingerprintDecision =
   | { readonly _tag: "unsupported"; readonly warning: string }
 
 export interface ManagerAkahuInterAccountTransferPayloadInput {
-  readonly rule: ManagerAkahuTransferRuleInput
+  readonly rule: LinkedAccountTransferRule
   readonly date: string
   readonly signedNormalizedAmount: ManagerLineAmount
   readonly description: string
@@ -145,7 +144,7 @@ export interface ManagerAkahuInterAccountTransferPayloadInput {
 }
 
 export interface ManagerAkahuInterAccountTransferClassificationInput {
-  readonly rule: ManagerAkahuTransferRuleInput
+  readonly rule: LinkedAccountTransferRule
   readonly date: DateTime.DateTime
   readonly signedAmount: ManagerAkahuDecimalInput
   readonly description: string
@@ -296,6 +295,24 @@ export const getAbsoluteManagerAkahuAmount = (amount: ManagerLineAmount): Manage
 export const normalizeAkahuTransactionDescription = (description: string): string =>
   description.trim().toLowerCase().replace(/\s+/g, " ")
 
+const encodeAkahuPendingFingerprintComponent = (component: string): string =>
+  encodeURIComponent(component)
+
+const buildTransferRuleAggregationPart = (rule: LinkedAccountTransferRule) => ({
+  normalizedKeyword: rule.normalizedKeyword,
+  destinationAccountKey: rule.destinationAccountKey,
+})
+
+const buildTransferRuleOverlapAggregationKey = (
+  selectedRule: LinkedAccountTransferRule,
+  ignoredRules: ReadonlyArray<LinkedAccountTransferRule>,
+): string =>
+  JSON.stringify({
+    sourceAccountKey: selectedRule.sourceAccountKey,
+    selectedRule: buildTransferRuleAggregationPart(selectedRule),
+    ignoredRules: ignoredRules.map(buildTransferRuleAggregationPart),
+  })
+
 export const buildAkahuPendingTransactionFingerprint = (
   input: ManagerAkahuPendingFingerprintInput,
 ): ManagerAkahuPendingFingerprintDecision => {
@@ -316,12 +333,12 @@ export const buildAkahuPendingTransactionFingerprint = (
 }
 
 export const matchManagerAkahuTransferRule = (input: {
-  readonly rules: ReadonlyArray<ManagerAkahuTransferRuleInput>
+  readonly rules: ReadonlyArray<LinkedAccountTransferRule>
   readonly description: string
 }): ManagerAkahuTransferRuleMatchDecision => {
-  const normalizedDescription = normalizeAkahuTransactionDescription(input.description)
+  const normalizedDescription = normalizeAkahuTransferRuleText(input.description)
   const matches = input.rules.filter((rule) =>
-    normalizedDescription.includes(rule.normalizedKeyword),
+    matchesAkahuTransferRuleDescription(rule, input.description),
   )
   if (matches.length === 0) {
     return { _tag: "noMatch", normalizedDescription }
@@ -333,10 +350,15 @@ export const matchManagerAkahuTransferRule = (input: {
     normalizedDescription,
     rule: matches[0],
     ignoredRules,
-    warning:
+    overlapMatch:
       ignoredRules.length === 0
         ? undefined
-        : `Transfer rule "${matches[0].keyword}" matched first; ${ignoredRules.length} later matching rule(s) were ignored.`,
+        : {
+            sourceAccountKey: matches[0].sourceAccountKey,
+            selectedRule: matches[0],
+            ignoredRules,
+            aggregationKey: buildTransferRuleOverlapAggregationKey(matches[0], ignoredRules),
+          },
   }
 }
 
@@ -349,10 +371,19 @@ export const buildAkahuPendingTransferFingerprint = (
   }
 
   const date = DateTime.formatIsoDate(input.date)
-  const normalizedDescription = normalizeAkahuTransactionDescription(input.description)
+  const normalizedDescription = normalizeAkahuTransferRuleText(input.description)
+  const fingerprintComponents = [
+    input.akahuAccountId,
+    input.rule.sourceAccountKey,
+    input.rule.destinationAccountKey,
+    date,
+    amount.amount,
+    normalizedDescription,
+    input.rule.normalizedKeyword,
+  ].map(encodeAkahuPendingFingerprintComponent)
   return {
     _tag: "fingerprint",
-    fingerprint: `${managerAkahuTransferPendingFingerprintPrefix}${input.akahuAccountId}:${input.rule.sourceAccountKey}:${input.rule.destinationAccountKey}:${date}:${amount.amount}:${normalizedDescription}:${input.rule.normalizedKeyword}`,
+    fingerprint: `${managerAkahuTransferPendingFingerprintPrefix}${fingerprintComponents.join(":")}`,
     date,
     normalizedAmount: amount.amount,
     normalizedDescription,

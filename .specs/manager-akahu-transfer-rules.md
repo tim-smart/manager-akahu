@@ -322,12 +322,13 @@ Status: Completed.
 
 ### Task 4 Review: Transfer Payload Helper Code Quality Follow-Up
 
-Status: Pending.
+Status: Completed.
 
-- Replace the manager-api-local `ManagerAkahuTransferRuleInput` shape and transfer-rule matching implementation with the canonical domain transfer-rule model/helpers. `@app/manager-api` already depends on `@app/domain`, and later sync wiring will pass `LinkedAccount.transferRules`, so duplicating `LinkedAccountTransferRule` plus the normalize/substring match semantics creates avoidable drift at the package boundary. Prefer accepting `LinkedAccountTransferRule` or a narrow `Pick<LinkedAccountTransferRule, ...>` and reusing `matchesAkahuTransferRuleDescription` / `normalizeAkahuTransferRuleText` instead of maintaining a second rule contract.
-- Make transfer-rule overlap decisions structural instead of formatting a per-transaction warning inside `matchManagerAkahuTransferRule`. The spec requires overlapping-rule warnings to be aggregated per source account and ignored-rule combination per sync run; returning an optional warning string from the pure match helper and testing that exact text nudges later wiring toward warning spam. Return the selected rule, ignored rules, and a stable aggregation key or structured overlap event, then format/deduplicate warnings in the sync orchestration layer.
-- Make transfer-specific pending fingerprints delimiter-safe before wiring pending transfer sync. The current `:`-joined fingerprint includes variable description and keyword text that may also contain `:`, so distinct component tuples can collapse to the same FDX ID. Encode each component or serialize/hash a stable tuple, and add a regression test that proves descriptions/keywords containing separators cannot collide.
-- After the refactor, rerun `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerCompatibility.test.ts"`, `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"`, and `pnpm --filter @app/manager-api build`.
+- Completed: Replaced the manager-api-local `ManagerAkahuTransferRuleInput` interface with direct `LinkedAccountTransferRule` inputs and reused canonical domain `matchesAkahuTransferRuleDescription` / `normalizeAkahuTransferRuleText` behavior in transfer-rule matching and transfer pending fingerprint normalization.
+- Completed: Changed `matchManagerAkahuTransferRule` to return structural overlap data instead of formatted warning text. The match result now includes the selected rule, ignored rules, and an aggregation key so later sync orchestration can deduplicate and format warnings per source account and ignored-rule combination.
+- Completed: Made transfer-specific pending fingerprints delimiter-safe by encoding each fingerprint tuple component before joining, and added a regression test proving descriptions/keywords containing `:` cannot collapse distinct tuples into the same fingerprint.
+- Discovery: manager-api tests did not previously need to resolve `@app/domain/*` at runtime. After manager-api began importing the domain helper directly, its Vite test project needed the same `@app/domain` source alias pattern already used by the website package; `packages/manager-api/vite.config.ts` now maps the workspace package to `packages/domain/src` for tests.
+- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerCompatibility.test.ts"`, `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"`, and `pnpm --filter @app/manager-api build`; all passed.
 
 ### Task 5: Add Pure Transfer Duplicate, Merge, Stale, And Count Metadata
 
