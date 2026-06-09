@@ -275,6 +275,14 @@ Status: Completed.
 - Keep existing setup states and stale Akahu account selection behavior unchanged.
 - Validation: `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm --filter @app/domain build`, `pnpm test:website-sync-controller`, `pnpm --filter website build`, `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, and `pnpm ready`.
 
+### Task 2 Review: Setup Transfer Rule Code Quality Follow-Up
+
+Status: Pending.
+
+- Extract setup transfer-rule validation/enrichment out of `apps/website/src/Manager/Flows.ts` before wiring sync freshness. `parseLinkedAccountTransferRules` currently owns destination lookup, self-target rejection, metadata enrichment, and warning semantics inside setup, but Task 6 needs to re-read current Manager account custom fields at sync start and apply the same semantics. Move this into one canonical pure helper, such as `buildLinkedAccountTransferRules({ sourceAccount, rawValue, managerAccountsByKey })`, with a shared Manager bank/cash account metadata type so setup and sync cannot drift or duplicate the same branching.
+- Collapse the custom-field ensure logic into a single canonical bank/cash account text-field helper before adding more setup fields. `ensureAccountField`, `createDropdownField`, `ensureMultilineAccountTextField`, and `createMultilineAccountTextField` now split related field invariants across multiple paths, and the multiline repair path spreads `...field.item` while changing `type`/`placement`, which can preserve stale type-specific data such as dropdown options. Prefer constructing a clean desired payload for create/update from `{ name, type, placement, optionsForDropdownList? }` and using one update path that preserves existing account-level values without carrying obsolete field-shape properties.
+- Add effect-level setup tests for the actual `Akahu Transfer Rules` custom-field create/update behavior, not only the pure `isManagerAkahuTransferRulesFieldCurrent` predicate. Cover missing-field creation, wrong-type repair, wrong-placement repair, and preservation of existing Manager account custom-field values through the field update path.
+
 ### Task 3: Extend Manager Sync Read For Inter-Account Transfers
 
 - Extend `ManagerBatchPagination.ts` to fetch all `inter-account-transfer-batch` pages.
