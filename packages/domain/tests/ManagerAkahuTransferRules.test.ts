@@ -118,6 +118,7 @@ test("builds linked-account transfer rules with source and destination metadata"
   })
 
   expect(result.warnings).toEqual([])
+  expect(result.skippedRules).toEqual([])
   expect(result.rules).toMatchObject([
     {
       sourceAccountKey: "manager-checking",
@@ -145,6 +146,18 @@ test("skips linked-account transfer rules with invalid destination keys", () => 
   expect(result.warnings).toEqual([
     'Transfer rule "Rent" targets unknown Manager bank/cash account key manager-missing and was skipped.',
   ])
+  expect(result.skippedRules).toMatchObject([
+    {
+      reason: "unknownDestinationAccountKey",
+      warning:
+        'Transfer rule "Rent" targets unknown Manager bank/cash account key manager-missing and was skipped.',
+      rule: {
+        keyword: "Rent",
+        normalizedKeyword: "rent",
+        destinationAccountKey: "manager-missing",
+      },
+    },
+  ])
 })
 
 test("skips linked-account transfer rules targeting the source account", () => {
@@ -157,6 +170,17 @@ test("skips linked-account transfer rules targeting the source account", () => {
   expect(result.rules).toEqual([])
   expect(result.warnings).toEqual([
     'Transfer rule "Self" targets its own Manager bank/cash account and was skipped.',
+  ])
+  expect(result.skippedRules).toMatchObject([
+    {
+      reason: "selfTarget",
+      warning: 'Transfer rule "Self" targets its own Manager bank/cash account and was skipped.',
+      rule: {
+        keyword: "Self",
+        normalizedKeyword: "self",
+        destinationAccountKey: "manager-checking",
+      },
+    },
   ])
 })
 

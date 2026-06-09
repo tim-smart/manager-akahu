@@ -625,7 +625,7 @@ it.effect("bypasses ordinary receipt and payment creation for settled transfer m
 )
 
 it.effect(
-  "skips settled transactions whose matching transfer rule has an invalid destination",
+  "skips settled transactions whose matching sync-start transfer rule has an unknown destination",
   () =>
     Effect.gen(function* () {
       const { client, interAccountTransferPayloads, paymentPayloads, receiptPayloads } =
@@ -654,6 +654,7 @@ it.effect(
       expect(receiptPayloads).toEqual([])
       expect(paymentPayloads).toEqual([])
       expect(interAccountTransferPayloads).toEqual([])
+      expect(summary.accounts[0]?.account.transferRules).toEqual([])
       expect(summary.accounts[0]?.warnings).toEqual([
         'Transfer rule "Bad transfer" targets unknown Manager bank/cash account key missing-destination and was skipped.',
       ])
@@ -666,6 +667,43 @@ it.effect(
         errors: 0,
       })
     }),
+)
+
+it.effect("skips settled transactions whose matching sync-start transfer rule targets itself", () =>
+  Effect.gen(function* () {
+    const { client, interAccountTransferPayloads, paymentPayloads, receiptPayloads } =
+      makeMockClient({
+        receipts: [],
+        managerAccounts: makeDefaultManagerAccounts("Self transfer, manager-checking"),
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction("settled-self-transfer", "-12.34", "Self transfer"),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(receiptPayloads).toEqual([])
+    expect(paymentPayloads).toEqual([])
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(summary.accounts[0]?.account.transferRules).toEqual([])
+    expect(summary.accounts[0]?.warnings).toEqual([
+      'Transfer rule "Self transfer" targets its own Manager bank/cash account and was skipped.',
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      transferRulesMatched: 0,
+      unsupportedSkipped: 1,
+      transfersCreated: 0,
+      warnings: 1,
+      errors: 0,
+    })
+  }),
 )
 
 it.effect("skips settled transfers to foreign-currency destination accounts", () =>

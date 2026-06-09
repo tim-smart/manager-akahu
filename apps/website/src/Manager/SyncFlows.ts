@@ -4,8 +4,8 @@ import {
   buildLinkedAccountTransferRules,
   LinkedAccount,
   matchesAkahuTransferRuleDescription,
-  parseAkahuTransferRules,
   type AkahuTokens,
+  type LinkedAccountTransferRuleSkipped,
   type ManagerAkahuTransferRuleAccountMetadata,
 } from "@app/domain/Manager/AkahuCustomFields"
 import type { AccountId, PendingTransaction, Transaction } from "@app/domain/Akahu"
@@ -136,13 +136,9 @@ type ManagerAkahuTransferCreateClassification = Extract<
   { readonly _tag: "transfer" }
 >
 
-interface ManagerAkahuInvalidTransferRuleMatcher {
-  readonly rule: ReturnType<typeof parseAkahuTransferRules>["rules"][number]
-}
-
 interface ManagerAkahuRefreshedLinkedAccount {
   readonly account: LinkedAccount
-  readonly invalidTransferRuleMatchers: ReadonlyArray<ManagerAkahuInvalidTransferRuleMatcher>
+  readonly invalidTransferRuleMatchers: ReadonlyArray<LinkedAccountTransferRuleSkipped>
 }
 
 interface ManagerAkahuReceiptUpdatePayload {
@@ -159,7 +155,7 @@ interface ManagerAkahuTransactionSyncAccountContext {
   readonly account: LinkedAccount
   readonly client: ManagerAkahuTransactionSyncManagerClient
   readonly syncRead: ManagerBankOrCashAccountSyncRead
-  readonly invalidTransferRuleMatchers: ReadonlyArray<ManagerAkahuInvalidTransferRuleMatcher>
+  readonly invalidTransferRuleMatchers: ReadonlyArray<LinkedAccountTransferRuleSkipped>
 }
 
 export class ManagerSyncFlows extends Context.Service<
@@ -416,11 +412,7 @@ const refreshManagerAkahuTransferRuleAccounts = Effect.fn(
         transferRules: transferRulesResult.rules,
         transferRuleWarnings: transferRulesResult.warnings,
       }),
-      invalidTransferRuleMatchers: buildInvalidTransferRuleMatchers({
-        sourceAccount,
-        rawValue,
-        managerAccountsByKey,
-      }),
+      invalidTransferRuleMatchers: transferRulesResult.skippedRules,
     }
   })
 })
@@ -454,37 +446,6 @@ const managerAkahuAccountMetadata = (
   currency: account.currency ?? null,
   canHavePendingTransactions: account.canHavePendingTransactions === true,
 })
-
-const buildInvalidTransferRuleMatchers = (options: {
-  readonly sourceAccount: ManagerAkahuTransferRuleAccountMetadata
-  readonly rawValue: unknown
-  readonly managerAccountsByKey: ReadonlyMap<string, ManagerAkahuTransferRuleAccountMetadata>
-}): ReadonlyArray<ManagerAkahuInvalidTransferRuleMatcher> => {
-  if (typeof options.rawValue !== "string" || options.rawValue.trim() === "") {
-    return []
-  }
-
-  const parsed = parseAkahuTransferRules(options.rawValue)
-  const matchers: Array<ManagerAkahuInvalidTransferRuleMatcher> = []
-  const seenRuleKeys = new Set<string>()
-
-  for (const rule of parsed.rules) {
-    const ruleKey = `${rule.normalizedKeyword}\u0000${rule.destinationAccountKey}`
-    if (seenRuleKeys.has(ruleKey)) {
-      continue
-    }
-    seenRuleKeys.add(ruleKey)
-
-    if (
-      rule.destinationAccountKey === options.sourceAccount.key ||
-      !options.managerAccountsByKey.has(rule.destinationAccountKey)
-    ) {
-      matchers.push({ rule })
-    }
-  }
-
-  return matchers
-}
 
 const syncManagerAkahuSettledTransactionPhase = Effect.fn(
   "syncManagerAkahuSettledTransactionPhase",

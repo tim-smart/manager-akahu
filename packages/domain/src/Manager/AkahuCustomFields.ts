@@ -122,17 +122,33 @@ export class LinkedAccountTransferRule extends Schema.Class<LinkedAccountTransfe
   destinationAccountCanHavePendingTransactions: Schema.Boolean,
 }) {}
 
+export const LinkedAccountTransferRuleSkippedReason = Schema.Literals([
+  "selfTarget",
+  "unknownDestinationAccountKey",
+])
+export type LinkedAccountTransferRuleSkippedReason =
+  typeof LinkedAccountTransferRuleSkippedReason.Type
+
+export class LinkedAccountTransferRuleSkipped extends Schema.Class<LinkedAccountTransferRuleSkipped>(
+  "LinkedAccountTransferRuleSkipped",
+)({
+  rule: AkahuTransferRule,
+  reason: LinkedAccountTransferRuleSkippedReason,
+  warning: Schema.String,
+}) {}
+
 export const buildLinkedAccountTransferRules = (options: {
   readonly sourceAccount: ManagerAkahuTransferRuleAccountMetadata
   readonly rawValue: unknown
   readonly managerAccountsByKey: ReadonlyMap<string, ManagerAkahuTransferRuleAccountMetadata>
 }) => {
   if (typeof options.rawValue !== "string" || options.rawValue.trim() === "") {
-    return { rules: [], warnings: [] } as const
+    return { rules: [], warnings: [], skippedRules: [] } as const
   }
 
   const parsed = parseAkahuTransferRules(options.rawValue)
   const rules: Array<LinkedAccountTransferRule> = []
+  const skippedRules: Array<LinkedAccountTransferRuleSkipped> = []
   const warnings = parsed.invalidLines.map((line) =>
     formatTransferRuleSyntaxWarning(line.reason, line.lineNumber),
   )
@@ -146,16 +162,28 @@ export const buildLinkedAccountTransferRules = (options: {
     seenRuleKeys.add(ruleKey)
 
     if (rule.destinationAccountKey === options.sourceAccount.key) {
-      warnings.push(
-        `Transfer rule "${rule.keyword}" targets its own Manager bank/cash account and was skipped.`,
+      const warning = `Transfer rule "${rule.keyword}" targets its own Manager bank/cash account and was skipped.`
+      warnings.push(warning)
+      skippedRules.push(
+        new LinkedAccountTransferRuleSkipped({
+          rule,
+          reason: "selfTarget",
+          warning,
+        }),
       )
       continue
     }
 
     const destinationAccount = options.managerAccountsByKey.get(rule.destinationAccountKey)
     if (!destinationAccount) {
-      warnings.push(
-        `Transfer rule "${rule.keyword}" targets unknown Manager bank/cash account key ${rule.destinationAccountKey} and was skipped.`,
+      const warning = `Transfer rule "${rule.keyword}" targets unknown Manager bank/cash account key ${rule.destinationAccountKey} and was skipped.`
+      warnings.push(warning)
+      skippedRules.push(
+        new LinkedAccountTransferRuleSkipped({
+          rule,
+          reason: "unknownDestinationAccountKey",
+          warning,
+        }),
       )
       continue
     }
@@ -176,7 +204,7 @@ export const buildLinkedAccountTransferRules = (options: {
     )
   }
 
-  return { rules, warnings } as const
+  return { rules, warnings, skippedRules } as const
 }
 
 const formatTransferRuleSyntaxWarning = (reason: string, lineNumber: number) => {
