@@ -376,13 +376,13 @@ Status: Completed.
 
 ### Task 6 Review: Settled Transfer Sync Code Quality Follow-Up
 
-Status: Partially Completed.
+Status: Completed.
 
 - Completed: Do not preserve cached setup-time transfer rules when sync-start refresh cannot prove current Manager state. `refreshManagerAkahuTransferRuleAccounts` now rebuilds affected linked accounts with empty current transfer rules, no invalid transfer-rule matchers, and a non-blocking warning when the `Akahu Transfer Rules` field is missing or the selected Manager account is absent from the refreshed account batch. Focused `ManagerSyncFlows` tests cover field deletion after setup and selected account absence from the refreshed batch.
 - Discovery: the existing foreign-currency sync-flow test was relying on the old fallback by omitting the selected USD Manager account from the refreshed account batch. Its mock now includes the selected USD account so the test remains scoped to currency skip behavior.
 - Completed: Moved invalid transfer-intent matching back into the canonical domain transfer-rule boundary. `buildLinkedAccountTransferRules` now returns valid rules, warning text, and structured skipped rules with `selfTarget` / `unknownDestinationAccountKey` reasons; `SyncFlows.ts` consumes those skipped rules during sync-start refresh instead of reparsing `Akahu Transfer Rules` or duplicating destination validation in website orchestration.
-- Collapse settled transaction orchestration before wiring Task 7/8 transfer merge and pending behavior. `processManagerAkahuSettledTransaction` now contains two parallel import pipelines for transfer and receipt/payment flows, with duplicated same-run duplicate checks, warning/count mutation, duplicate-overlap result construction, and create/write handling. Introduce a small settled import-intent decision boundary (`invalid-transfer-intent`, `transfer`, or `suspense`) plus shared account-state helpers for warning skips, duplicate-overlap skips, and successful writes, so mirror merge and pending transfer work does not add more nested special cases to the settled stream loop.
-- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
+- Completed: Collapsed settled transaction orchestration before wiring Task 7/8 transfer merge and pending behavior. `processManagerAkahuSettledTransaction` now uses a small settled import-intent decision boundary (`invalid-transfer-intent`, `transfer`, or `suspense`) before dispatching to transfer or suspense handling, and shared account-state helpers now cover warning skips, duplicate-overlap skips, and successful writes.
+- Validation for settled import-intent refactor: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
 ### Task 7: Wire Settled Mirror Merge And Pending Replacement
 
