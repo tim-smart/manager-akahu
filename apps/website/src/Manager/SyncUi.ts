@@ -25,8 +25,12 @@ export const initialManagerAkahuSyncDialogState: ManagerAkahuSyncDialogState = {
 export const managerAkahuSyncSummaryCountLabels: Record<ManagerAkahuSyncSummaryCountKey, string> = {
   settledFetched: "Settled fetched",
   pendingFetched: "Pending fetched",
+  transferRulesMatched: "Transfer rules matched",
   receiptsCreated: "Receipts created",
   paymentsCreated: "Payments created",
+  transfersCreated: "Transfers created",
+  transfersUpdated: "Transfers updated",
+  transfersMerged: "Transfers merged",
   duplicatesSkipped: "Duplicates skipped",
   zeroAmountSkipped: "Zero amounts skipped",
   unsupportedSkipped: "Unsupported skipped",
@@ -34,6 +38,7 @@ export const managerAkahuSyncSummaryCountLabels: Record<ManagerAkahuSyncSummaryC
   pendingUpdated: "Pending updated",
   pendingSettled: "Pending settled",
   stalePendingDetected: "Stale pending detected",
+  stalePendingTransfersDetected: "Stale pending transfers detected",
   warnings: "Warnings",
   errors: "Errors",
 }

@@ -1,17 +1,20 @@
 import { Manager } from "@/Manager"
 import { Context, Effect, Layer, Resource } from "effect"
 import {
+  buildLinkedAccountTransferRules,
   LinkedAccount,
   makeManagerAkahuSetupState,
   ManagerAkahuSetupError,
   ManagerAkahuSetupInvalidCredentials,
   ManagerAkahuSetupMissingCredentials,
+  type ManagerAkahuTransferRuleAccountMetadata,
   type ManagerAkahuSetupState,
   StaleLinkedAccountSelection,
 } from "@app/domain/Manager/AkahuCustomFields"
 import { ApiClient } from "@/ApiClient"
 import type { Account } from "@app/domain/Akahu"
 import { AkahuRpcError } from "@app/domain/rpc"
+import type { Client, ItemOfTextCustomField, TextCustomField } from "@app/manager-api/ManagerClient"
 import {
   decodeManagerAkahuBusinessDetailTokens,
   findManagerAkahuCredentialFields,
@@ -32,6 +35,90 @@ type ManagerAkahuAccountRecord = {
       | undefined
   }
 }
+
+export const managerAkahuAccountFieldName = "Akahu Account"
+export const managerAkahuTransferRulesFieldName = "Akahu Transfer Rules"
+
+const managerBankOrCashAccountCustomFieldPlacement = [
+  "1408c33b-6284-4f50-9e31-48cbea21f3cf",
+] as const
+const managerMultilineTextCustomFieldType = 1
+const managerDropdownTextCustomFieldType = 2
+
+type ManagerTextCustomFieldClient = Pick<
+  Client,
+  "POST/api4/text-custom-field" | "PUT/api4/text-custom-field"
+>
+
+type EnsureManagerBankOrCashAccountTextFieldOptions = {
+  readonly client: ManagerTextCustomFieldClient
+  readonly getCurrentFields: () => Effect.Effect<ReadonlyArray<ItemOfTextCustomField>, unknown>
+  readonly refreshFields: () => Effect.Effect<void, unknown>
+  readonly name: string
+  readonly type: number
+  readonly placement: ReadonlyArray<string>
+  readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
+}
+
+export const ensureManagerBankOrCashAccountTextField = Effect.fn(
+  "ManagerFlows.ensureManagerBankOrCashAccountTextField",
+)(function* (options: EnsureManagerBankOrCashAccountTextFieldOptions) {
+  const desired = makeManagerBankOrCashAccountTextFieldPayload(options)
+  const current = yield* options.getCurrentFields()
+  let field = current.find((field) => field.item.name === options.name)
+
+  if (!field) {
+    yield* options.client["POST/api4/text-custom-field"]({ value: desired })
+    yield* options.refreshFields()
+    const refreshed = yield* options.getCurrentFields()
+    return refreshed.find((field) => field.item.name === options.name)!
+  }
+
+  if (!isManagerBankOrCashAccountTextFieldCurrent(field.item, desired)) {
+    yield* options.client["PUT/api4/text-custom-field"]({
+      key: field.key,
+      value: desired,
+    })
+    yield* options.refreshFields()
+    const refreshed = yield* options.getCurrentFields()
+    field = refreshed.find((field) => field.item.name === options.name) ?? field
+  }
+
+  return field
+})
+
+const makeManagerBankOrCashAccountTextFieldPayload = (options: {
+  readonly name: string
+  readonly type: number
+  readonly placement: ReadonlyArray<string>
+  readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
+}): TextCustomField => {
+  const payload: TextCustomField = {
+    name: options.name,
+    type: options.type,
+    placement: [...options.placement],
+    excludeFromCopyingOrCloning: true,
+    size: 2,
+  }
+
+  if (options.optionsForDropdownList !== undefined) {
+    return {
+      ...payload,
+      optionsForDropdownList: options.optionsForDropdownList.join("\n"),
+    }
+  }
+
+  return payload
+}
+
+const isManagerBankOrCashAccountTextFieldCurrent = (
+  field: TextCustomField,
+  desired: TextCustomField,
+) =>
+  field.type === desired.type &&
+  sameStringSet(field.placement ?? [], desired.placement ?? []) &&
+  (desired.optionsForDropdownList === undefined ||
+    field.optionsForDropdownList === desired.optionsForDropdownList)
 
 export class ManagerFlows extends Context.Service<
   ManagerFlows,
@@ -82,48 +169,6 @@ export class ManagerFlows extends Context.Service<
         return current.find((field) => field.item.name === name)!
       })
 
-      const ensureAccountField = Effect.fn("ManagerFlows.ensureAccountField")(function* (options: {
-        readonly name: string
-        readonly options: ReadonlyArray<{
-          readonly label: string
-          readonly value: string
-        }>
-      }) {
-        const current = yield* Resource.get(textFields)
-        let field = current.find((field) => field.item.name === options.name)
-        if (!field) {
-          field = yield* createDropdownField(options.name, options.options.map(encodeMultipleValue))
-        } else {
-          yield* client["PUT/api4/text-custom-field"]({
-            key: field.key,
-            value: {
-              ...field.item,
-              optionsForDropdownList: options.options.map(encodeMultipleValue).join("\n"),
-            },
-          })
-        }
-        return field
-      })
-
-      const createDropdownField = Effect.fn("ManagerFlows.createDropdownField")(function* (
-        name: string,
-        options: ReadonlyArray<string>,
-      ) {
-        yield* client["POST/api4/text-custom-field"]({
-          value: {
-            name,
-            type: 2,
-            placement: ["1408c33b-6284-4f50-9e31-48cbea21f3cf"],
-            optionsForDropdownList: options.join("\n"),
-            excludeFromCopyingOrCloning: true,
-            size: 2,
-          },
-        })
-        yield* Resource.refresh(textFields)
-        const current = yield* Resource.get(textFields)
-        return current.find((field) => field.item.name === name)!
-      })
-
       const getAkahuSetupState = Effect.gen(function* () {
         const fields = yield* ensureCustomFields
         const business = yield* client["GET/api4/business-details"]()
@@ -152,18 +197,34 @@ export class ManagerFlows extends Context.Service<
         }
 
         const accounts = accountsResult.accounts
-        const accountField = yield* ensureAccountField({
-          name: "Akahu Account",
-          options: accounts.map((account) => ({
-            label: account.name,
-            value: account._id,
-          })),
+        const accountField = yield* ensureManagerBankOrCashAccountTextField({
+          client,
+          getCurrentFields: () => Resource.get(textFields),
+          refreshFields: () => Resource.refresh(textFields),
+          name: managerAkahuAccountFieldName,
+          type: managerDropdownTextCustomFieldType,
+          placement: managerBankOrCashAccountCustomFieldPlacement,
+          optionsForDropdownList: accounts.map((account) =>
+            encodeMultipleValue({
+              label: account.name,
+              value: account._id,
+            }),
+          ),
+        })
+        const transferRulesField = yield* ensureManagerBankOrCashAccountTextField({
+          client,
+          getCurrentFields: () => Resource.get(textFields),
+          refreshFields: () => Resource.refresh(textFields),
+          name: managerAkahuTransferRulesFieldName,
+          type: managerMultilineTextCustomFieldType,
+          placement: managerBankOrCashAccountCustomFieldPlacement,
         })
 
         const managerAccounts = (yield* client["GET/api4/bank-or-cash-account-batch"]()).items ?? []
         const selections = collectManagerAkahuAccountSelections({
           managerAccounts,
           accountFieldKey: accountField.key,
+          transferRulesFieldKey: transferRulesField.key,
           akahuAccounts: accounts,
         })
 
@@ -192,10 +253,22 @@ export class ManagerFlows extends Context.Service<
 export const collectManagerAkahuAccountSelections = (options: {
   readonly managerAccounts: ReadonlyArray<ManagerAkahuAccountRecord>
   readonly accountFieldKey: string
+  readonly transferRulesFieldKey: string
   readonly akahuAccounts: ReadonlyArray<Account>
 }) => {
   const linkedAccounts: Array<LinkedAccount> = []
   const staleSelections: Array<StaleLinkedAccountSelection> = []
+  const managerAccountsByKey = new Map<string, ManagerAkahuTransferRuleAccountMetadata>(
+    options.managerAccounts.map(({ item: account, key }) => [
+      key,
+      {
+        key,
+        name: account.name ?? "",
+        currency: account.currency ?? null,
+        canHavePendingTransactions: account.canHavePendingTransactions === true,
+      },
+    ]),
+  )
 
   for (const { item: account, key } of options.managerAccounts) {
     const fields = account.customFields2?.strings ?? {}
@@ -212,10 +285,17 @@ export const collectManagerAkahuAccountSelections = (options: {
     } as const
 
     if (akahuAccount) {
+      const transferRulesResult = buildLinkedAccountTransferRules({
+        sourceAccount: accountMetadata,
+        rawValue: fields[options.transferRulesFieldKey],
+        managerAccountsByKey,
+      })
       linkedAccounts.push(
         new LinkedAccount({
           ...accountMetadata,
           akahuAccount,
+          transferRules: transferRulesResult.rules,
+          transferRuleWarnings: transferRulesResult.warnings,
         }),
       )
     } else {
@@ -231,6 +311,21 @@ export const collectManagerAkahuAccountSelections = (options: {
 
   return { linkedAccounts, staleSelections } as const
 }
+
+export const isManagerAkahuTransferRulesFieldCurrent = (field: {
+  readonly type?: number | undefined
+  readonly placement?: ReadonlyArray<string> | null | undefined
+}) => isMultilineAccountTextField(field)
+
+const isMultilineAccountTextField = (field: {
+  readonly type?: number | undefined
+  readonly placement?: ReadonlyArray<string> | null | undefined
+}) =>
+  field.type === managerMultilineTextCustomFieldType &&
+  sameStringSet(field.placement ?? [], managerBankOrCashAccountCustomFieldPlacement)
+
+const sameStringSet = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
+  left.length === right.length && right.every((value) => left.includes(value))
 
 export const mapAkahuAccountsReadFailure = (error: AkahuRpcError): ManagerAkahuSetupState => {
   switch (error.reason) {

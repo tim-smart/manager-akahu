@@ -1,7 +1,9 @@
 import type {
   BankAccountClearStatus as ManagerBankAccountClearStatus,
   BankOrCashAccount as ManagerBankOrCashAccount,
+  InterAccountTransfer2 as ManagerInterAccountTransferCreate,
   Payment2 as ManagerPaymentCreate,
+  PostInterAccountTransfer as ManagerPostInterAccountTransfer,
   PostPayment as ManagerPostPayment,
   PostReceipt as ManagerPostReceipt,
   Receipt2 as ManagerReceiptCreate,
@@ -65,6 +67,23 @@ export interface ManagerSuspensePaymentPayload extends ManagerPostPayment {
   readonly value: ManagerSuspensePaymentValue
 }
 
+export interface ManagerInterAccountTransferValue extends ManagerInterAccountTransferCreate {
+  readonly date: NonNullable<ManagerInterAccountTransferCreate["date"]>
+  readonly description: NonNullable<ManagerInterAccountTransferCreate["description"]>
+  readonly paidFrom: NonNullable<ManagerInterAccountTransferCreate["paidFrom"]>
+  readonly receivedIn: NonNullable<ManagerInterAccountTransferCreate["receivedIn"]>
+  readonly creditAmount: ManagerLineAmount
+  readonly debitAmount: ManagerLineAmount
+  readonly creditClearStatus: NonNullable<ManagerInterAccountTransferCreate["creditClearStatus"]>
+  readonly debitClearStatus: NonNullable<ManagerInterAccountTransferCreate["debitClearStatus"]>
+}
+
+// Extending the generated POST wrapper keeps this production payload boundary
+// checked at build time when ManagerClient.ts changes.
+export interface ManagerInterAccountTransferPayload extends ManagerPostInterAccountTransfer {
+  readonly value: ManagerInterAccountTransferValue
+}
+
 export type ManagerSuspenseImportSkipReason =
   | { readonly _tag: "zeroAmount"; readonly signedNormalizedAmount: ManagerLineAmount }
   | { readonly _tag: "notImportable"; readonly warning: string }
@@ -85,6 +104,22 @@ export const managerPendingClearanceFields = {
 export const managerSettledClearanceFields = {
   cleared: ManagerBankAccountClearStatusValue.onSameDate,
 } as const satisfies Pick<ManagerReceiptCreate, "cleared">
+
+export const managerPendingInterAccountTransferClearanceFields = {
+  creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+  debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+} as const satisfies Pick<
+  ManagerInterAccountTransferCreate,
+  "creditClearStatus" | "debitClearStatus"
+>
+
+export const managerSettledInterAccountTransferClearanceFields = {
+  creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+  debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+} as const satisfies Pick<
+  ManagerInterAccountTransferCreate,
+  "creditClearStatus" | "debitClearStatus"
+>
 
 const buildManagerClearanceFields = (clearance: ManagerImportClearance) =>
   clearance._tag === "pending" ? managerPendingClearanceFields : managerSettledClearanceFields
