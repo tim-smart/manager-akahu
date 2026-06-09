@@ -18,14 +18,18 @@ import {
   decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
   decideStalePendingEntries,
+  decideStalePendingTransferEntries,
+  decideTransferDuplicateByFdxTransactionId,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
+  isManagerAkahuMirroredTransferCandidate,
   managerAkahuPendingFingerprintPrefix,
   managerAkahuTransferPendingFingerprintPrefix,
   managerAkahuSyncSummaryCountKeys,
   matchManagerAkahuTransferRule,
   normalizeAkahuTransactionDescription,
   normalizeManagerAkahuAmount,
+  selectManagerAkahuMirroredTransferCandidate,
   ManagerBankAccountClearStatusValue,
 } from "../src/index.ts"
 
@@ -515,6 +519,234 @@ test("decides settled duplicates by Akahu settled transaction ID", () => {
   })
 })
 
+test("decides transfer duplicates through the common FDX index", () => {
+  const payload = buildManagerAkahuInterAccountTransferPayload({
+    rule: transferRule(),
+    date: "2026-06-04",
+    signedNormalizedAmount: "-12.34",
+    description: "Transfer out",
+    fdxTransactionId: "akahu-transfer-1",
+    clearance: { _tag: "settled" },
+  })
+  const transfer = interAccountTransferItem("transfer-1", {
+    ...payload.value,
+    fdxCreditTransactionId: "akahu-transfer-1",
+  })
+  const receipt = receiptItem("receipt-1", { fdxTransactionId: "akahu-receipt-1" })
+
+  expect(
+    decideTransferDuplicateByFdxTransactionId({
+      syncRead: managerSyncRead({}),
+      fdxTransactionId: "new-transfer",
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toEqual({ _tag: "create", fdxTransactionId: "new-transfer" })
+
+  const duplicate = decideTransferDuplicateByFdxTransactionId({
+    syncRead: managerSyncRead({ interAccountTransfers: [transfer] }),
+    fdxTransactionId: "akahu-transfer-1",
+    sourceTransferSide: "credit",
+    payload,
+  })
+  expect(duplicate._tag).toBe("duplicate")
+  if (duplicate._tag !== "duplicate") {
+    throw new Error(`Expected duplicate, got ${duplicate._tag}`)
+  }
+  expect(duplicate.entries[0].key).toBe("transfer-1")
+
+  const previouslyImported = decideTransferDuplicateByFdxTransactionId({
+    syncRead: managerSyncRead({ receipts: [receipt] }),
+    fdxTransactionId: "akahu-receipt-1",
+    sourceTransferSide: "credit",
+    payload,
+  })
+  expect(previouslyImported).toMatchObject({
+    _tag: "previouslyImportedAsSuspense",
+    warning:
+      "Akahu transaction akahu-receipt-1 was already imported as a Manager receipt; skipping transfer import.",
+  })
+})
+
+test("reports ambiguous transfer duplicate decisions from the common FDX index", () => {
+  const payload = buildManagerAkahuInterAccountTransferPayload({
+    rule: transferRule(),
+    date: "2026-06-04",
+    signedNormalizedAmount: "-12.34",
+    description: "Transfer out",
+    fdxTransactionId: "ambiguous-fdx",
+    clearance: { _tag: "settled" },
+  })
+  const syncRead = managerSyncRead({
+    receipts: [receiptItem("receipt-1", { fdxTransactionId: "ambiguous-fdx" })],
+    interAccountTransfers: [
+      interAccountTransferItem("transfer-1", {
+        ...payload.value,
+        fdxCreditTransactionId: "ambiguous-fdx",
+      }),
+    ],
+  })
+
+  const decision = decideTransferDuplicateByFdxTransactionId({
+    syncRead,
+    fdxTransactionId: "ambiguous-fdx",
+    sourceTransferSide: "credit",
+    payload,
+  })
+  expect(decision._tag).toBe("ambiguous")
+  if (decision._tag !== "ambiguous") {
+    throw new Error(`Expected ambiguous, got ${decision._tag}`)
+  }
+  expect(decision.entries.map((entry) => entry.key)).toEqual(["receipt-1", "transfer-1"])
+  expect(decision.warning).toBe(
+    "Found 2 existing Manager entries with FDX transaction ID ambiguous-fdx.",
+  )
+})
+
+test("selects safe mirrored inter-account transfer candidates only", () => {
+  const payload = buildManagerAkahuInterAccountTransferPayload({
+    rule: transferRule(),
+    date: "2026-06-04",
+    signedNormalizedAmount: "-12.34",
+    description: "Transfer out",
+    fdxTransactionId: "credit-side-fdx",
+    clearance: { _tag: "settled" },
+  })
+  const safe = interAccountTransferItem("transfer-safe", {
+    ...payload.value,
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx",
+  })
+  const currentSideAlreadySet = interAccountTransferItem("transfer-current-set", {
+    ...payload.value,
+    fdxCreditTransactionId: "other-credit-side-fdx",
+    fdxDebitTransactionId: "debit-side-fdx",
+  })
+  const oppositeSideMissing = interAccountTransferItem("transfer-opposite-missing", {
+    ...payload.value,
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "",
+  })
+  const amountMismatch = interAccountTransferItem("transfer-amount-mismatch", {
+    ...payload.value,
+    creditAmount: "12.35",
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx",
+  })
+
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: safe,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(true)
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: currentSideAlreadySet,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(false)
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: oppositeSideMissing,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(false)
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: amountMismatch,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(false)
+})
+
+test("selects unique mirrored transfer candidates and reports ambiguous candidates", () => {
+  const payload = buildManagerAkahuInterAccountTransferPayload({
+    rule: transferRule(),
+    date: "2026-06-04",
+    signedNormalizedAmount: "-12.34",
+    description: "Transfer out",
+    fdxTransactionId: "credit-side-fdx",
+    clearance: { _tag: "settled" },
+  })
+  const first = interAccountTransferItem("transfer-1", {
+    ...payload.value,
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx-1",
+  })
+  const second = interAccountTransferItem("transfer-2", {
+    ...payload.value,
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx-2",
+  })
+
+  expect(
+    selectManagerAkahuMirroredTransferCandidate({
+      syncRead: managerSyncRead({}),
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toEqual({ _tag: "none" })
+
+  const unique = selectManagerAkahuMirroredTransferCandidate({
+    syncRead: managerSyncRead({ interAccountTransfers: [first] }),
+    sourceTransferSide: "credit",
+    payload,
+  })
+  expect(unique._tag).toBe("candidate")
+  if (unique._tag !== "candidate") {
+    throw new Error(`Expected candidate, got ${unique._tag}`)
+  }
+  expect(unique.candidate.key).toBe("transfer-1")
+
+  const ambiguous = selectManagerAkahuMirroredTransferCandidate({
+    syncRead: managerSyncRead({ interAccountTransfers: [first, second] }),
+    sourceTransferSide: "credit",
+    payload,
+  })
+  expect(ambiguous._tag).toBe("ambiguous")
+  if (ambiguous._tag !== "ambiguous") {
+    throw new Error(`Expected ambiguous, got ${ambiguous._tag}`)
+  }
+  expect(ambiguous.candidates.map((candidate) => candidate.key)).toEqual([
+    "transfer-1",
+    "transfer-2",
+  ])
+  expect(ambiguous.warning).toBe("Found 2 possible mirrored Manager inter-account transfers.")
+})
+
+test("treats a matching opposite-side transfer FDX duplicate as a mirror candidate", () => {
+  const payload = buildManagerAkahuInterAccountTransferPayload({
+    rule: transferRule(),
+    date: "2026-06-04",
+    signedNormalizedAmount: "-12.34",
+    description: "Transfer out",
+    fdxTransactionId: "shared-fdx",
+    clearance: { _tag: "settled" },
+  })
+  const transfer = interAccountTransferItem("transfer-1", {
+    ...payload.value,
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "shared-fdx",
+  })
+
+  const decision = decideTransferDuplicateByFdxTransactionId({
+    syncRead: managerSyncRead({ interAccountTransfers: [transfer] }),
+    fdxTransactionId: "shared-fdx",
+    sourceTransferSide: "credit",
+    payload,
+  })
+  expect(decision._tag).toBe("mirrorCandidate")
+  if (decision._tag !== "mirrorCandidate") {
+    throw new Error(`Expected mirrorCandidate, got ${decision._tag}`)
+  }
+  expect(decision.entry.key).toBe("transfer-1")
+})
+
 test("decides pending create, update, and ambiguous exact fingerprint matches", () => {
   const fingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:12.34:coffee shop`
   const syncRead = managerSyncRead({
@@ -590,6 +822,51 @@ test("decides stale Akahu-created pending entries absent from current pending re
       processedFdxTransactionIds: new Set([processedFingerprint]),
     }).map((entry) => entry.key),
   ).toEqual(["receipt-stale", "payment-stale"])
+})
+
+test("decides stale Akahu-created pending transfer entries absent from current pending results", () => {
+  const currentFingerprint = `${managerAkahuTransferPendingFingerprintPrefix}acc:bank-1:bank-2:2026-06-04:12.34:current`
+  const processedFingerprint = `${managerAkahuTransferPendingFingerprintPrefix}acc:bank-1:bank-2:2026-06-04:12.34:processed`
+  const staleCreditFingerprint = `${managerAkahuTransferPendingFingerprintPrefix}acc:bank-1:bank-2:2026-06-04:12.34:stale-credit`
+  const staleDebitFingerprint = `${managerAkahuTransferPendingFingerprintPrefix}acc:bank-2:bank-1:2026-06-04:-12.34:stale-debit`
+  const receiptPendingPrefixTransferFingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:12.34:old-transfer-prefix`
+  const syncRead = managerSyncRead({
+    interAccountTransfers: [
+      interAccountTransferItem("transfer-current", {
+        paidFrom: bankOrCashAccountKey,
+        receivedIn: "bank-2",
+        fdxCreditTransactionId: currentFingerprint,
+      }),
+      interAccountTransferItem("transfer-processed", {
+        paidFrom: bankOrCashAccountKey,
+        receivedIn: "bank-2",
+        fdxCreditTransactionId: processedFingerprint,
+      }),
+      interAccountTransferItem("transfer-stale-credit", {
+        paidFrom: bankOrCashAccountKey,
+        receivedIn: "bank-2",
+        fdxCreditTransactionId: staleCreditFingerprint,
+      }),
+      interAccountTransferItem("transfer-stale-debit", {
+        paidFrom: "bank-2",
+        receivedIn: bankOrCashAccountKey,
+        fdxDebitTransactionId: staleDebitFingerprint,
+      }),
+      interAccountTransferItem("transfer-old-prefix", {
+        paidFrom: bankOrCashAccountKey,
+        receivedIn: "bank-2",
+        fdxCreditTransactionId: receiptPendingPrefixTransferFingerprint,
+      }),
+    ],
+  })
+
+  expect(
+    decideStalePendingTransferEntries({
+      syncRead,
+      currentPendingFdxTransactionIds: new Set([currentFingerprint]),
+      processedFdxTransactionIds: new Set([processedFingerprint]),
+    }).map((entry) => `${entry.key}:${entry.transferSide}`),
+  ).toEqual(["transfer-stale-credit:credit", "transfer-stale-debit:debit"])
 })
 
 test("safely matches exactly one pending candidate to a settled transaction", () => {
@@ -699,8 +976,12 @@ test("accumulates all sync summary counts", () => {
   expect(oneEach).toEqual({
     settledFetched: 1,
     pendingFetched: 1,
+    transferRulesMatched: 1,
     receiptsCreated: 1,
     paymentsCreated: 1,
+    transfersCreated: 1,
+    transfersUpdated: 1,
+    transfersMerged: 1,
     duplicatesSkipped: 1,
     zeroAmountSkipped: 1,
     unsupportedSkipped: 1,
@@ -708,6 +989,7 @@ test("accumulates all sync summary counts", () => {
     pendingUpdated: 1,
     pendingSettled: 1,
     stalePendingDetected: 1,
+    stalePendingTransfersDetected: 1,
     warnings: 1,
     errors: 1,
   })
@@ -715,8 +997,12 @@ test("accumulates all sync summary counts", () => {
   expect(addManagerAkahuSyncSummaryCounts(oneEach, oneEach)).toEqual({
     settledFetched: 2,
     pendingFetched: 2,
+    transferRulesMatched: 2,
     receiptsCreated: 2,
     paymentsCreated: 2,
+    transfersCreated: 2,
+    transfersUpdated: 2,
+    transfersMerged: 2,
     duplicatesSkipped: 2,
     zeroAmountSkipped: 2,
     unsupportedSkipped: 2,
@@ -724,6 +1010,7 @@ test("accumulates all sync summary counts", () => {
     pendingUpdated: 2,
     pendingSettled: 2,
     stalePendingDetected: 2,
+    stalePendingTransfersDetected: 2,
     warnings: 2,
     errors: 2,
   })

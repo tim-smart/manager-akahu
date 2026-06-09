@@ -332,12 +332,19 @@ Status: Completed.
 
 ### Task 5: Add Pure Transfer Duplicate, Merge, Stale, And Count Metadata
 
+Status: Completed.
+
 - Add pure duplicate decisions for transfer FDX entries in the common sync-read index.
 - Add pure safe mirrored-candidate selection helpers.
 - Add pure stale pending transfer detection helpers.
 - Extend `ManagerAkahuSyncSummaryCounts` with transfer counts and update `SyncUi.ts` labels in the same task so exhaustive `Record<ManagerAkahuSyncSummaryCountKey, string>` typechecking continues to pass.
 - Add focused tests for duplicate/ambiguous duplicate decisions, safe merge, ambiguous merge, stale pending transfer entries, and count-label metadata.
-- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm --filter @app/manager-api build`, `pnpm test:website-sync-controller`, and `pnpm --filter website build`.
+- Completed: Added pure transfer duplicate decisions in `ManagerAkahuTransactionSync.ts` against the common sync-read FDX index. The helper separates create, direct transfer duplicate, receipt/payment collision, ambiguous multi-entry collision, and the safe mirrored-candidate exception without writing to Manager.
+- Completed: Added pure mirrored transfer candidate helpers that require matching transfer endpoints, date, normalized debit/credit amounts, a blank current-side FDX field, and a present opposite-side FDX field. Ambiguous candidate selection returns structured candidates and warning text for later sync orchestration.
+- Completed: Added transfer-specific stale pending entry detection over the transfer FDX projection only, using the `akahu-transfer-pending:v1:` prefix so receipt/payment pending lifecycle helpers remain isolated.
+- Completed: Extended `ManagerAkahuSyncSummaryCounts` and website sync summary labels with `transfersCreated`, `transfersUpdated`, `transfersMerged`, `transferRulesMatched`, and `stalePendingTransfersDetected`.
+- Discovery: Existing pure tests make it clear that receipt/payment stale and exact-pending helpers must continue to ignore transfer FDX entries. Transfer stale detection therefore uses a separate helper rather than widening the receipt/payment helper.
+- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm --filter @app/manager-api build`, `pnpm test:website-sync-controller`, and `pnpm --filter website build` passed.
 
 ### Task 6: Wire Settled Transfer Create And Duplicate Skip
 

@@ -14,6 +14,8 @@ import {
 import {
   closeManagerAkahuSyncDialog,
   initialManagerAkahuSyncDialogState,
+  managerAkahuSyncSummaryCountLabels,
+  managerAkahuSyncSummaryRows,
   openManagerAkahuSyncDialog,
   sanitizeManagerAkahuSyncDialogText,
   type ManagerAkahuSyncDialogState,
@@ -301,4 +303,15 @@ it("redacts credential-looking values in fallback dialog text", () => {
   expect(sanitizeManagerAkahuSyncDialogText("akahuUserToken=secret-value")).toBe(
     "akahuUserToken=[redacted]",
   )
+})
+
+it("exposes transfer-specific sync summary count labels", () => {
+  expect(managerAkahuSyncSummaryCountLabels.transferRulesMatched).toBe("Transfer rules matched")
+  expect(managerAkahuSyncSummaryCountLabels.transfersCreated).toBe("Transfers created")
+  expect(managerAkahuSyncSummaryCountLabels.transfersUpdated).toBe("Transfers updated")
+  expect(managerAkahuSyncSummaryCountLabels.transfersMerged).toBe("Transfers merged")
+  expect(managerAkahuSyncSummaryCountLabels.stalePendingTransfersDetected).toBe(
+    "Stale pending transfers detected",
+  )
+  expect(managerAkahuSyncSummaryRows.map((row) => row.key)).toContain("transfersMerged")
 })

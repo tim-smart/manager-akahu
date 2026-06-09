@@ -18,6 +18,7 @@ import type {
   ManagerBankOrCashAccountSyncRead,
   ManagerExistingFdxTransactionIdEntry,
   ManagerExistingReceiptPaymentFdxTransactionIdEntry,
+  ManagerExistingTransferFdxTransactionIdEntry,
 } from "./ManagerBatchPagination.ts"
 
 export const managerAkahuPendingFingerprintPrefix = "akahu-pending:v1:" as const
@@ -26,8 +27,12 @@ export const managerAkahuTransferPendingFingerprintPrefix = "akahu-transfer-pend
 export const managerAkahuSyncSummaryCountKeys = [
   "settledFetched",
   "pendingFetched",
+  "transferRulesMatched",
   "receiptsCreated",
   "paymentsCreated",
+  "transfersCreated",
+  "transfersUpdated",
+  "transfersMerged",
   "duplicatesSkipped",
   "zeroAmountSkipped",
   "unsupportedSkipped",
@@ -35,6 +40,7 @@ export const managerAkahuSyncSummaryCountKeys = [
   "pendingUpdated",
   "pendingSettled",
   "stalePendingDetected",
+  "stalePendingTransfersDetected",
   "warnings",
   "errors",
 ] as const
@@ -171,6 +177,58 @@ export type ManagerAkahuSettledDuplicateDecision =
     }
   | { readonly _tag: "create"; readonly akahuTransactionId: string }
 
+export interface ManagerAkahuTransferDuplicateDecisionInput {
+  readonly syncRead: Pick<ManagerBankOrCashAccountSyncRead, "existingFdxTransactionIdIndex">
+  readonly fdxTransactionId: string
+  readonly sourceTransferSide: ManagerAkahuTransferSourceSide
+  readonly payload: ManagerInterAccountTransferPayload
+}
+
+export type ManagerAkahuTransferDuplicateDecision =
+  | { readonly _tag: "create"; readonly fdxTransactionId: string }
+  | {
+      readonly _tag: "duplicate"
+      readonly fdxTransactionId: string
+      readonly entries: ReadonlyArray<ManagerExistingTransferFdxTransactionIdEntry>
+    }
+  | {
+      readonly _tag: "mirrorCandidate"
+      readonly fdxTransactionId: string
+      readonly entry: ManagerExistingTransferFdxTransactionIdEntry
+    }
+  | {
+      readonly _tag: "previouslyImportedAsSuspense"
+      readonly fdxTransactionId: string
+      readonly entries: ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
+      readonly warning: string
+    }
+  | {
+      readonly _tag: "ambiguous"
+      readonly fdxTransactionId: string
+      readonly entries: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
+      readonly warning: string
+    }
+
+export interface ManagerAkahuMirroredTransferCandidateInput {
+  readonly syncRead: Pick<ManagerBankOrCashAccountSyncRead, "interAccountTransfers">
+  readonly sourceTransferSide: ManagerAkahuTransferSourceSide
+  readonly payload: ManagerInterAccountTransferPayload
+}
+
+export type ManagerAkahuMirroredTransferCandidateDecision =
+  | { readonly _tag: "none" }
+  | {
+      readonly _tag: "candidate"
+      readonly candidate: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+    }
+  | {
+      readonly _tag: "ambiguous"
+      readonly candidates: ReadonlyArray<
+        ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+      >
+      readonly warning: string
+    }
+
 export type ManagerAkahuPendingExactFingerprintDecision =
   | { readonly _tag: "create"; readonly fingerprint: string }
   | {
@@ -216,11 +274,24 @@ export interface ManagerAkahuStalePendingEntriesInput {
   readonly processedFdxTransactionIds: ReadonlySet<string>
 }
 
+export interface ManagerAkahuStalePendingTransferEntriesInput {
+  readonly syncRead: Pick<
+    ManagerBankOrCashAccountSyncRead,
+    "existingTransferFdxTransactionIdEntries"
+  >
+  readonly currentPendingFdxTransactionIds: ReadonlySet<string>
+  readonly processedFdxTransactionIds: ReadonlySet<string>
+}
+
 export const emptyManagerAkahuSyncSummaryCounts = (): ManagerAkahuSyncSummaryCounts => ({
   settledFetched: 0,
   pendingFetched: 0,
+  transferRulesMatched: 0,
   receiptsCreated: 0,
   paymentsCreated: 0,
+  transfersCreated: 0,
+  transfersUpdated: 0,
+  transfersMerged: 0,
   duplicatesSkipped: 0,
   zeroAmountSkipped: 0,
   unsupportedSkipped: 0,
@@ -228,6 +299,7 @@ export const emptyManagerAkahuSyncSummaryCounts = (): ManagerAkahuSyncSummaryCou
   pendingUpdated: 0,
   pendingSettled: 0,
   stalePendingDetected: 0,
+  stalePendingTransfersDetected: 0,
   warnings: 0,
   errors: 0,
 })
@@ -522,6 +594,69 @@ export const classifyManagerAkahuSuspenseImport = (
 export const isAkahuPendingFdxTransactionId = (fdxTransactionId: string): boolean =>
   fdxTransactionId.startsWith(managerAkahuPendingFingerprintPrefix)
 
+export const isAkahuTransferPendingFdxTransactionId = (fdxTransactionId: string): boolean =>
+  fdxTransactionId.startsWith(managerAkahuTransferPendingFingerprintPrefix)
+
+const getOppositeTransferSide = (
+  side: ManagerAkahuTransferSourceSide,
+): ManagerAkahuTransferSourceSide => (side === "credit" ? "debit" : "credit")
+
+const getTransferSideFdxTransactionId = (
+  transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
+  side: ManagerAkahuTransferSourceSide,
+): string | null | undefined =>
+  side === "credit" ? transfer.item.fdxCreditTransactionId : transfer.item.fdxDebitTransactionId
+
+const isBlankManagerTransferFdxTransactionId = (fdxTransactionId: string | null | undefined) =>
+  fdxTransactionId === undefined || fdxTransactionId === null || fdxTransactionId === ""
+
+const normalizeManagerTransferAmount = (amount: unknown): ManagerLineAmount | undefined => {
+  if (typeof amount !== "string") {
+    return undefined
+  }
+
+  const normalized = normalizeManagerAkahuAmount(amount)
+  return normalized._tag === "amount" ? normalized.amount : undefined
+}
+
+export const isManagerAkahuMirroredTransferCandidate = (input: {
+  readonly transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+  readonly sourceTransferSide: ManagerAkahuTransferSourceSide
+  readonly payload: ManagerInterAccountTransferPayload
+}): boolean => {
+  const transfer = input.transfer.item
+  const payload = input.payload.value
+  if (
+    transfer.paidFrom !== payload.paidFrom ||
+    transfer.receivedIn !== payload.receivedIn ||
+    transfer.date !== payload.date
+  ) {
+    return false
+  }
+
+  if (
+    normalizeManagerTransferAmount(transfer.creditAmount) !== payload.creditAmount ||
+    normalizeManagerTransferAmount(transfer.debitAmount) !== payload.debitAmount
+  ) {
+    return false
+  }
+
+  if (
+    !isBlankManagerTransferFdxTransactionId(
+      getTransferSideFdxTransactionId(input.transfer, input.sourceTransferSide),
+    )
+  ) {
+    return false
+  }
+
+  return !isBlankManagerTransferFdxTransactionId(
+    getTransferSideFdxTransactionId(
+      input.transfer,
+      getOppositeTransferSide(input.sourceTransferSide),
+    ),
+  )
+}
+
 export const decideSettledDuplicateByAkahuTransactionId = (
   syncRead: ManagerBankOrCashAccountSyncRead,
   akahuTransactionId: string,
@@ -532,6 +667,69 @@ export const decideSettledDuplicateByAkahuTransactionId = (
   }
 
   return { _tag: "create", akahuTransactionId }
+}
+
+export const decideTransferDuplicateByFdxTransactionId = (
+  input: ManagerAkahuTransferDuplicateDecisionInput,
+): ManagerAkahuTransferDuplicateDecision => {
+  const entries = input.syncRead.existingFdxTransactionIdIndex.get(input.fdxTransactionId) ?? []
+  if (entries.length === 0) {
+    return { _tag: "create", fdxTransactionId: input.fdxTransactionId }
+  }
+  if (entries.length > 1) {
+    return {
+      _tag: "ambiguous",
+      fdxTransactionId: input.fdxTransactionId,
+      entries,
+      warning: `Found ${entries.length} existing Manager entries with FDX transaction ID ${input.fdxTransactionId}.`,
+    }
+  }
+
+  const [entry] = entries
+  if (entry._tag !== "interAccountTransfer") {
+    return {
+      _tag: "previouslyImportedAsSuspense",
+      fdxTransactionId: input.fdxTransactionId,
+      entries: [entry],
+      warning: `Akahu transaction ${input.fdxTransactionId} was already imported as a Manager ${entry._tag}; skipping transfer import.`,
+    }
+  }
+
+  if (
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: entry.interAccountTransfer,
+      sourceTransferSide: input.sourceTransferSide,
+      payload: input.payload,
+    })
+  ) {
+    return { _tag: "mirrorCandidate", fdxTransactionId: input.fdxTransactionId, entry }
+  }
+
+  return { _tag: "duplicate", fdxTransactionId: input.fdxTransactionId, entries: [entry] }
+}
+
+export const selectManagerAkahuMirroredTransferCandidate = (
+  input: ManagerAkahuMirroredTransferCandidateInput,
+): ManagerAkahuMirroredTransferCandidateDecision => {
+  const candidates = input.syncRead.interAccountTransfers.filter((transfer) =>
+    isManagerAkahuMirroredTransferCandidate({
+      transfer,
+      sourceTransferSide: input.sourceTransferSide,
+      payload: input.payload,
+    }),
+  )
+  if (candidates.length === 0) {
+    return { _tag: "none" }
+  }
+  if (candidates.length === 1) {
+    return { _tag: "candidate", candidate: candidates[0] }
+  }
+
+  return {
+    _tag: "ambiguous",
+    candidates,
+    warning: `Found ${candidates.length} possible mirrored Manager inter-account transfers.`,
+  }
 }
 
 export const decidePendingExactFingerprint = (
@@ -560,6 +758,16 @@ export const decideStalePendingEntries = (
   input.syncRead.existingReceiptPaymentFdxTransactionIdEntries.filter(
     (entry) =>
       isAkahuPendingFdxTransactionId(entry.fdxTransactionId) &&
+      !input.currentPendingFdxTransactionIds.has(entry.fdxTransactionId) &&
+      !input.processedFdxTransactionIds.has(entry.fdxTransactionId),
+  )
+
+export const decideStalePendingTransferEntries = (
+  input: ManagerAkahuStalePendingTransferEntriesInput,
+): ReadonlyArray<ManagerExistingTransferFdxTransactionIdEntry> =>
+  input.syncRead.existingTransferFdxTransactionIdEntries.filter(
+    (entry) =>
+      isAkahuTransferPendingFdxTransactionId(entry.fdxTransactionId) &&
       !input.currentPendingFdxTransactionIds.has(entry.fdxTransactionId) &&
       !input.processedFdxTransactionIds.has(entry.fdxTransactionId),
   )
