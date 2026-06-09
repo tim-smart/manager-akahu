@@ -348,11 +348,13 @@ Status: Completed.
 
 ### Task 5 Review: Transfer Decision Helper Code Quality Follow-Up
 
-Status: Pending.
+Status: Completed.
 
 - Structural issue: mirror-candidate matching currently normalizes Manager transfer amounts through a helper that accepts `unknown` and only handles strings, while the generated Manager transfer batch model exposes `creditAmount` and `debitAmount` as `number | string | undefined`. This makes safe mirror selection depend on an incidental runtime representation and can silently reject otherwise safe candidates when Manager returns numeric amounts.
 - Preferred remedy: make the Manager-read amount boundary explicit before wiring transfer writes. Introduce a small typed normalizer for Manager transfer read amounts, accepting the generated `number | string | undefined` shape and returning the canonical `ManagerLineAmount` or `undefined`, then use it in `isManagerAkahuMirroredTransferCandidate` instead of the current `unknown`/string-only helper.
 - Add focused regression coverage proving mirrored candidates match when Manager returns numeric `creditAmount`/`debitAmount`, while still rejecting invalid or missing amounts.
+- Completed: Added the typed Manager inter-account transfer read amount normalizer and wired mirror-candidate matching through it so generated numeric and string read amounts normalize to canonical Manager line amounts, while invalid or missing amounts reject the candidate.
+- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"` and `pnpm --filter @app/manager-api build` passed.
 
 ### Task 6: Wire Settled Transfer Create And Duplicate Skip
 

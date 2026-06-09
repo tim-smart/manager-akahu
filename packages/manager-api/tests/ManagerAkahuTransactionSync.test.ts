@@ -617,6 +617,13 @@ test("selects safe mirrored inter-account transfer candidates only", () => {
     fdxCreditTransactionId: null,
     fdxDebitTransactionId: "debit-side-fdx",
   })
+  const safeNumericAmounts = interAccountTransferItem("transfer-safe-numeric-amounts", {
+    ...payload.value,
+    creditAmount: 12.34,
+    debitAmount: 12.34,
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx",
+  })
   const currentSideAlreadySet = interAccountTransferItem("transfer-current-set", {
     ...payload.value,
     fdxCreditTransactionId: "other-credit-side-fdx",
@@ -633,10 +640,29 @@ test("selects safe mirrored inter-account transfer candidates only", () => {
     fdxCreditTransactionId: null,
     fdxDebitTransactionId: "debit-side-fdx",
   })
+  const invalidAmount = interAccountTransferItem("transfer-invalid-amount", {
+    ...payload.value,
+    creditAmount: "invalid",
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx",
+  })
+  const missingAmount = interAccountTransferItem("transfer-missing-amount", {
+    ...payload.value,
+    debitAmount: undefined,
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx",
+  })
 
   expect(
     isManagerAkahuMirroredTransferCandidate({
       transfer: safe,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(true)
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: safeNumericAmounts,
       sourceTransferSide: "credit",
       payload,
     }),
@@ -658,6 +684,20 @@ test("selects safe mirrored inter-account transfer candidates only", () => {
   expect(
     isManagerAkahuMirroredTransferCandidate({
       transfer: amountMismatch,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(false)
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: invalidAmount,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(false)
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer: missingAmount,
       sourceTransferSide: "credit",
       payload,
     }),

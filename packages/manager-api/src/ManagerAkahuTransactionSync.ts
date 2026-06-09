@@ -610,12 +610,19 @@ const getTransferSideFdxTransactionId = (
 const isBlankManagerTransferFdxTransactionId = (fdxTransactionId: string | null | undefined) =>
   fdxTransactionId === undefined || fdxTransactionId === null || fdxTransactionId === ""
 
-const normalizeManagerTransferAmount = (amount: unknown): ManagerLineAmount | undefined => {
-  if (typeof amount !== "string") {
+type ManagerInterAccountTransferReadAmount =
+  ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]["item"]["creditAmount"]
+
+const normalizeManagerInterAccountTransferReadAmount = (
+  amount: ManagerInterAccountTransferReadAmount,
+): ManagerLineAmount | undefined => {
+  if (amount === undefined) {
     return undefined
   }
 
-  const normalized = normalizeManagerAkahuAmount(amount)
+  const normalized = normalizeManagerAkahuAmount(
+    typeof amount === "number" ? String(amount) : amount,
+  )
   return normalized._tag === "amount" ? normalized.amount : undefined
 }
 
@@ -635,8 +642,9 @@ export const isManagerAkahuMirroredTransferCandidate = (input: {
   }
 
   if (
-    normalizeManagerTransferAmount(transfer.creditAmount) !== payload.creditAmount ||
-    normalizeManagerTransferAmount(transfer.debitAmount) !== payload.debitAmount
+    normalizeManagerInterAccountTransferReadAmount(transfer.creditAmount) !==
+      payload.creditAmount ||
+    normalizeManagerInterAccountTransferReadAmount(transfer.debitAmount) !== payload.debitAmount
   ) {
     return false
   }
