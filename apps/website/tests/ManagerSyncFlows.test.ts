@@ -581,6 +581,51 @@ it.effect("skips settled transfers already imported as Manager transfers", () =>
   }),
 )
 
+it.effect("skips settled mirror merge when the current FDX is already on the opposite side", () =>
+  Effect.gen(function* () {
+    const existingTransfer = makeManagerInterAccountTransfer("existing-transfer-opposite-fdx", {
+      date: "2026-06-05",
+      description: "Transfer to savings",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: destinationBankOrCashAccountKey,
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      fdxDebitTransactionId: "settled-transfer-opposite-fdx",
+    })
+    const { client, interAccountTransferPayloads, interAccountTransferPutPayloads } =
+      makeMockClient({
+        receipts: [],
+        interAccountTransfers: [existingTransfer],
+        managerAccounts: makeDefaultManagerAccounts("Transfer to savings, manager-savings"),
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction("settled-transfer-opposite-fdx", "-25.01", "Transfer to savings"),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(interAccountTransferPutPayloads).toEqual([])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      transferRulesMatched: 1,
+      transfersCreated: 0,
+      transfersMerged: 0,
+      duplicatesSkipped: 1,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
 it.effect("merges settled transfer mirrors into an existing Manager transfer", () =>
   Effect.gen(function* () {
     const existingTransfer = makeManagerInterAccountTransfer("existing-transfer-mirror", {

@@ -759,7 +759,7 @@ test("selects unique mirrored transfer candidates and reports ambiguous candidat
   expect(ambiguous.warning).toBe("Found 2 possible mirrored Manager inter-account transfers.")
 })
 
-test("treats a matching opposite-side transfer FDX duplicate as a mirror candidate", () => {
+test("treats a matching opposite-side transfer FDX duplicate as a duplicate", () => {
   const payload = buildManagerAkahuInterAccountTransferPayload({
     rule: transferRule(),
     date: "2026-06-04",
@@ -774,17 +774,25 @@ test("treats a matching opposite-side transfer FDX duplicate as a mirror candida
     fdxDebitTransactionId: "shared-fdx",
   })
 
+  expect(
+    isManagerAkahuMirroredTransferCandidate({
+      transfer,
+      sourceTransferSide: "credit",
+      payload,
+    }),
+  ).toBe(false)
+
   const decision = decideTransferDuplicateByFdxTransactionId({
     syncRead: managerSyncRead({ interAccountTransfers: [transfer] }),
     fdxTransactionId: "shared-fdx",
     sourceTransferSide: "credit",
     payload,
   })
-  expect(decision._tag).toBe("mirrorCandidate")
-  if (decision._tag !== "mirrorCandidate") {
-    throw new Error(`Expected mirrorCandidate, got ${decision._tag}`)
+  expect(decision._tag).toBe("duplicate")
+  if (decision._tag !== "duplicate") {
+    throw new Error(`Expected duplicate, got ${decision._tag}`)
   }
-  expect(decision.entry.key).toBe("transfer-1")
+  expect(decision.entries[0].key).toBe("transfer-1")
 })
 
 test("decides pending create, update, and ambiguous exact fingerprint matches", () => {

@@ -874,15 +874,6 @@ const processManagerAkahuSettledTransferTransaction = Effect.fn(
         state: input.state,
         fdxTransactionId: input.transaction._id,
       })
-    case "mirrorCandidate":
-      accountState = yield* updateManagerAkahuSettledMirroredTransfer({
-        state: accountState,
-        client: input.client,
-        fdxTransactionId: input.transaction._id,
-        classification: input.classification,
-        candidate: duplicateDecision.entry.interAccountTransfer,
-      })
-      return continueManagerAkahuSettledPhase({ ...input.state, accountState })
     case "previouslyImportedAsSuspense":
     case "ambiguous":
       return skipManagerAkahuSettledPhaseDuplicateOverlap({

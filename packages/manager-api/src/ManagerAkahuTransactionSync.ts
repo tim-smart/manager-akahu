@@ -192,11 +192,6 @@ export type ManagerAkahuTransferDuplicateDecision =
       readonly entries: ReadonlyArray<ManagerExistingTransferFdxTransactionIdEntry>
     }
   | {
-      readonly _tag: "mirrorCandidate"
-      readonly fdxTransactionId: string
-      readonly entry: ManagerExistingTransferFdxTransactionIdEntry
-    }
-  | {
       readonly _tag: "previouslyImportedAsSuspense"
       readonly fdxTransactionId: string
       readonly entries: ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
@@ -607,6 +602,12 @@ const getTransferSideFdxTransactionId = (
 ): string | null | undefined =>
   side === "credit" ? transfer.item.fdxCreditTransactionId : transfer.item.fdxDebitTransactionId
 
+const getTransferPayloadSideFdxTransactionId = (
+  payload: ManagerInterAccountTransferPayload,
+  side: ManagerAkahuTransferSourceSide,
+): string | null | undefined =>
+  side === "credit" ? payload.value.fdxCreditTransactionId : payload.value.fdxDebitTransactionId
+
 const isBlankManagerTransferFdxTransactionId = (fdxTransactionId: string | null | undefined) =>
   fdxTransactionId === undefined || fdxTransactionId === null || fdxTransactionId === ""
 
@@ -657,11 +658,17 @@ export const isManagerAkahuMirroredTransferCandidate = (input: {
     return false
   }
 
-  return !isBlankManagerTransferFdxTransactionId(
-    getTransferSideFdxTransactionId(
-      input.transfer,
-      getOppositeTransferSide(input.sourceTransferSide),
-    ),
+  const oppositeSideFdxTransactionId = getTransferSideFdxTransactionId(
+    input.transfer,
+    getOppositeTransferSide(input.sourceTransferSide),
+  )
+  if (isBlankManagerTransferFdxTransactionId(oppositeSideFdxTransactionId)) {
+    return false
+  }
+
+  return (
+    oppositeSideFdxTransactionId !==
+    getTransferPayloadSideFdxTransactionId(input.payload, input.sourceTransferSide)
   )
 }
 
@@ -701,16 +708,6 @@ export const decideTransferDuplicateByFdxTransactionId = (
       entries: [entry],
       warning: `Akahu transaction ${input.fdxTransactionId} was already imported as a Manager ${entry._tag}; skipping transfer import.`,
     }
-  }
-
-  if (
-    isManagerAkahuMirroredTransferCandidate({
-      transfer: entry.interAccountTransfer,
-      sourceTransferSide: input.sourceTransferSide,
-      payload: input.payload,
-    })
-  ) {
-    return { _tag: "mirrorCandidate", fdxTransactionId: input.fdxTransactionId, entry }
   }
 
   return { _tag: "duplicate", fdxTransactionId: input.fdxTransactionId, entries: [entry] }
