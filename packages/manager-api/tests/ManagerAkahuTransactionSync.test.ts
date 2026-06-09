@@ -11,6 +11,7 @@ import {
   buildAkahuPendingTransactionFingerprint,
   buildAkahuPendingTransferFingerprint,
   buildManagerAkahuInterAccountTransferPayload,
+  buildManagerAkahuSettledMirroredTransferUpdatePayload,
   buildManagerBankOrCashAccountSyncRead,
   classifyManagerAkahuInterAccountTransfer,
   classifyManagerAkahuSuspenseImport,
@@ -757,6 +758,90 @@ test("selects unique mirrored transfer candidates and reports ambiguous candidat
     "transfer-2",
   ])
   expect(ambiguous.warning).toBe("Found 2 possible mirrored Manager inter-account transfers.")
+})
+
+test("builds settled credit-side mirrored transfer update payloads without replacing unrelated fields", () => {
+  const transfer = interAccountTransferItem("transfer-credit-side", {
+    date: "2026-06-04",
+    reference: "transfer-reference",
+    description: "Existing transfer description",
+    paidFrom: bankOrCashAccountKey,
+    creditAmount: "12.34",
+    creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+    creditClearDate: "2026-06-05",
+    receivedIn: "bank-2",
+    debitAmount: "12.34",
+    debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+    debitClearDate: "2026-06-06",
+    exchangeRate: "1.25",
+    exchangeRateIsInverse: true,
+    customTheme: true,
+    customThemeId: "theme-1",
+    automaticReference: false,
+    customFields: { field: "kept" },
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "debit-side-fdx",
+  })
+
+  const payload = buildManagerAkahuSettledMirroredTransferUpdatePayload({
+    transfer,
+    sourceTransferSide: "credit",
+    fdxTransactionId: "credit-side-settled-fdx",
+  })
+
+  expect(payload).toEqual({
+    key: "transfer-credit-side",
+    value: {
+      ...transfer.item,
+      creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      fdxCreditTransactionId: "credit-side-settled-fdx",
+    },
+  })
+  expect(payload.value.debitClearStatus).toBe(ManagerBankAccountClearStatusValue.onLaterDate)
+  expect(payload.value.debitClearDate).toBe("2026-06-06")
+  expect(payload.value.fdxDebitTransactionId).toBe("debit-side-fdx")
+})
+
+test("builds settled debit-side mirrored transfer update payloads without replacing unrelated fields", () => {
+  const transfer = interAccountTransferItem("transfer-debit-side", {
+    date: "2026-06-04",
+    reference: "transfer-reference",
+    description: "Existing transfer description",
+    paidFrom: "bank-2",
+    creditAmount: "18.20",
+    creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+    creditClearDate: "2026-06-05",
+    receivedIn: bankOrCashAccountKey,
+    debitAmount: "18.20",
+    debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+    debitClearDate: "2026-06-06",
+    exchangeRate: "1.25",
+    exchangeRateIsInverse: true,
+    customTheme: true,
+    customThemeId: "theme-1",
+    automaticReference: false,
+    customFields: { field: "kept" },
+    fdxCreditTransactionId: "credit-side-fdx",
+    fdxDebitTransactionId: null,
+  })
+
+  const payload = buildManagerAkahuSettledMirroredTransferUpdatePayload({
+    transfer,
+    sourceTransferSide: "debit",
+    fdxTransactionId: "debit-side-settled-fdx",
+  })
+
+  expect(payload).toEqual({
+    key: "transfer-debit-side",
+    value: {
+      ...transfer.item,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      fdxDebitTransactionId: "debit-side-settled-fdx",
+    },
+  })
+  expect(payload.value.creditClearStatus).toBe(ManagerBankAccountClearStatusValue.onLaterDate)
+  expect(payload.value.creditClearDate).toBe("2026-06-05")
+  expect(payload.value.fdxCreditTransactionId).toBe("credit-side-fdx")
 })
 
 test("treats a matching opposite-side transfer FDX duplicate as a duplicate", () => {

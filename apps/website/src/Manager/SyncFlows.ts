@@ -12,6 +12,7 @@ import type { AccountId, PendingTransaction, Transaction } from "@app/domain/Aka
 import {
   addManagerAkahuSyncSummaryCounts,
   buildAkahuPendingTransactionFingerprint,
+  buildManagerAkahuSettledMirroredTransferUpdatePayload,
   classifyManagerAkahuInterAccountTransfer,
   classifyManagerAkahuSuspenseImport,
   decidePendingExactFingerprint,
@@ -167,10 +168,6 @@ interface ManagerAkahuPaymentUpdatePayload {
   readonly key: string
   readonly value: ManagerSuspensePaymentValue
 }
-
-type ManagerAkahuInterAccountTransferUpdatePayload = Parameters<
-  ManagerAkahuTransactionSyncManagerClient["PUT/api4/inter-account-transfer"]
->[0]
 
 interface ManagerAkahuTransactionSyncAccountContext {
   readonly account: LinkedAccount
@@ -919,7 +916,11 @@ const updateManagerAkahuSettledMirroredTransfer = Effect.fn(
   readonly candidate: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
 }) {
   const writeResult = yield* input.client["PUT/api4/inter-account-transfer"](
-    buildManagerAkahuSettledMirroredTransferUpdatePayload(input),
+    buildManagerAkahuSettledMirroredTransferUpdatePayload({
+      transfer: input.candidate,
+      sourceTransferSide: input.classification.sourceTransferSide,
+      fdxTransactionId: input.fdxTransactionId,
+    }),
   ).pipe(
     Effect.as({ _tag: "updated" as const }),
     Effect.catch((error) =>
@@ -936,30 +937,6 @@ const updateManagerAkahuSettledMirroredTransfer = Effect.fn(
     successCounts: ["transfersMerged"],
   })
 })
-
-const buildManagerAkahuSettledMirroredTransferUpdatePayload = (input: {
-  readonly fdxTransactionId: string
-  readonly classification: ManagerAkahuTransferCreateClassification
-  readonly candidate: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
-}): ManagerAkahuInterAccountTransferUpdatePayload => {
-  const updateValue =
-    input.classification.sourceTransferSide === "credit"
-      ? {
-          ...input.candidate.item,
-          creditClearStatus: input.classification.payload.value.creditClearStatus,
-          fdxCreditTransactionId: input.fdxTransactionId,
-        }
-      : {
-          ...input.candidate.item,
-          debitClearStatus: input.classification.payload.value.debitClearStatus,
-          fdxDebitTransactionId: input.fdxTransactionId,
-        }
-
-  return {
-    key: input.candidate.key,
-    value: updateValue,
-  }
-}
 
 const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPendingTransaction")(
   function* (input: {

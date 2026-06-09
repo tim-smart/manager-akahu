@@ -20,6 +20,7 @@ import type {
   ManagerExistingReceiptPaymentFdxTransactionIdEntry,
   ManagerExistingTransferFdxTransactionIdEntry,
 } from "./ManagerBatchPagination.ts"
+import type { PutInterAccountTransfer as ManagerPutInterAccountTransfer } from "./ManagerClient.ts"
 
 export const managerAkahuPendingFingerprintPrefix = "akahu-pending:v1:" as const
 export const managerAkahuTransferPendingFingerprintPrefix = "akahu-transfer-pending:v1:" as const
@@ -223,6 +224,20 @@ export type ManagerAkahuMirroredTransferCandidateDecision =
       >
       readonly warning: string
     }
+
+export interface ManagerAkahuSettledMirroredTransferUpdatePayloadInput {
+  readonly transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+  readonly sourceTransferSide: ManagerAkahuTransferSourceSide
+  readonly fdxTransactionId: string
+}
+
+export interface ManagerAkahuInterAccountTransferUpdatePayload extends Omit<
+  ManagerPutInterAccountTransfer,
+  "key" | "value"
+> {
+  readonly key: string
+  readonly value: NonNullable<ManagerPutInterAccountTransfer["value"]>
+}
 
 export type ManagerAkahuPendingExactFingerprintDecision =
   | { readonly _tag: "create"; readonly fingerprint: string }
@@ -734,6 +749,28 @@ export const selectManagerAkahuMirroredTransferCandidate = (
     _tag: "ambiguous",
     candidates,
     warning: `Found ${candidates.length} possible mirrored Manager inter-account transfers.`,
+  }
+}
+
+export const buildManagerAkahuSettledMirroredTransferUpdatePayload = (
+  input: ManagerAkahuSettledMirroredTransferUpdatePayloadInput,
+): ManagerAkahuInterAccountTransferUpdatePayload => {
+  const value =
+    input.sourceTransferSide === "credit"
+      ? {
+          ...input.transfer.item,
+          creditClearStatus: managerSettledInterAccountTransferClearanceFields.creditClearStatus,
+          fdxCreditTransactionId: input.fdxTransactionId,
+        }
+      : {
+          ...input.transfer.item,
+          debitClearStatus: managerSettledInterAccountTransferClearanceFields.debitClearStatus,
+          fdxDebitTransactionId: input.fdxTransactionId,
+        }
+
+  return {
+    key: input.transfer.key,
+    value,
   }
 }
 
