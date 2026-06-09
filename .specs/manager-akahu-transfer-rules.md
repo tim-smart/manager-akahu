@@ -254,6 +254,14 @@ Status: Completed.
 - Do not wire the parser into setup or sync yet.
 - Validation: `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"` and `pnpm --filter @app/domain build`.
 
+### Task 1 Review: Transfer Rule Parser Code Quality Audit
+
+Status: Completed.
+
+- Review result: no structural follow-up changes required. The parser stays pure, syntax-only, localized in the Manager Akahu domain boundary, and avoids adding setup/sync account-lookup concerns before Task 2 owns them.
+- Keep this split in later tasks: destination-key existence checks, self-target rejection, destination display metadata, and user-facing warning text should layer on top of the parser instead of making the pure parser depend on Manager account batches or UI warning formatting.
+- Validation: independent review sub-agent reran `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"` and `pnpm --filter @app/domain build`; both passed.
+
 ### Task 2: Load `Akahu Transfer Rules` During Setup
 
 - Add a named constant for the `Akahu Transfer Rules` field.
