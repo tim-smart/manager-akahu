@@ -154,11 +154,36 @@ const appendExistingFdxTransactionIdEntry = <Entry extends ManagerExistingFdxTra
   entries.push(entry)
 }
 
+const appendExistingFdxTransactionIdProjectionEntry = <
+  Entry extends ManagerExistingFdxTransactionIdEntry,
+>(options: {
+  readonly fdxTransactionId: string | null | undefined
+  readonly buildEntry: (fdxTransactionId: string) => Entry
+  readonly entries: Array<ManagerExistingFdxTransactionIdEntry>
+  readonly projectionEntries: Array<Entry>
+  readonly mutableIndex: Map<string, Array<ManagerExistingFdxTransactionIdEntry>>
+  readonly mutableProjectionIndex: Map<string, Array<Entry>>
+}) => {
+  if (
+    options.fdxTransactionId === undefined ||
+    options.fdxTransactionId === null ||
+    options.fdxTransactionId === ""
+  ) {
+    return
+  }
+
+  const entry = options.buildEntry(options.fdxTransactionId)
+  options.entries.push(entry)
+  options.projectionEntries.push(entry)
+  appendExistingFdxTransactionIdEntry(options.mutableIndex, entry)
+  appendExistingFdxTransactionIdEntry(options.mutableProjectionIndex, entry)
+}
+
 export const buildManagerBankOrCashAccountSyncRead = (input: {
   readonly bankOrCashAccountKey: string
   readonly receipts: ReadonlyArray<ItemOfReceipt>
   readonly payments: ReadonlyArray<ItemOfPayment>
-  readonly interAccountTransfers?: ReadonlyArray<ItemOfInterAccountTransfer>
+  readonly interAccountTransfers: ReadonlyArray<ItemOfInterAccountTransfer>
 }): ManagerBankOrCashAccountSyncRead => {
   const entries: Array<ManagerExistingFdxTransactionIdEntry> = []
   const receiptPaymentEntries: Array<ManagerExistingReceiptPaymentFdxTransactionIdEntry> = []
@@ -172,89 +197,75 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
     string,
     Array<ManagerExistingTransferFdxTransactionIdEntry>
   >()
-  const interAccountTransfers = input.interAccountTransfers ?? []
 
   for (const receipt of input.receipts) {
-    const fdxTransactionId = receipt.item.fdxTransactionId
-    if (fdxTransactionId === undefined || fdxTransactionId === null || fdxTransactionId === "") {
-      continue
-    }
-
-    const entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry = {
-      _tag: "receipt",
-      fdxTransactionId,
-      key: receipt.key,
-      receipt,
-    }
-    entries.push(entry)
-    receiptPaymentEntries.push(entry)
-    appendExistingFdxTransactionIdEntry(mutableIndex, entry)
-    appendExistingFdxTransactionIdEntry(mutableReceiptPaymentIndex, entry)
+    appendExistingFdxTransactionIdProjectionEntry({
+      fdxTransactionId: receipt.item.fdxTransactionId,
+      buildEntry: (fdxTransactionId): ManagerExistingReceiptPaymentFdxTransactionIdEntry => ({
+        _tag: "receipt",
+        fdxTransactionId,
+        key: receipt.key,
+        receipt,
+      }),
+      entries,
+      projectionEntries: receiptPaymentEntries,
+      mutableIndex,
+      mutableProjectionIndex: mutableReceiptPaymentIndex,
+    })
   }
 
   for (const payment of input.payments) {
-    const fdxTransactionId = payment.item.fdxTransactionId
-    if (fdxTransactionId === undefined || fdxTransactionId === null || fdxTransactionId === "") {
-      continue
-    }
-
-    const entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry = {
-      _tag: "payment",
-      fdxTransactionId,
-      key: payment.key,
-      payment,
-    }
-    entries.push(entry)
-    receiptPaymentEntries.push(entry)
-    appendExistingFdxTransactionIdEntry(mutableIndex, entry)
-    appendExistingFdxTransactionIdEntry(mutableReceiptPaymentIndex, entry)
+    appendExistingFdxTransactionIdProjectionEntry({
+      fdxTransactionId: payment.item.fdxTransactionId,
+      buildEntry: (fdxTransactionId): ManagerExistingReceiptPaymentFdxTransactionIdEntry => ({
+        _tag: "payment",
+        fdxTransactionId,
+        key: payment.key,
+        payment,
+      }),
+      entries,
+      projectionEntries: receiptPaymentEntries,
+      mutableIndex,
+      mutableProjectionIndex: mutableReceiptPaymentIndex,
+    })
   }
 
-  for (const interAccountTransfer of interAccountTransfers) {
-    const fdxCreditTransactionId = interAccountTransfer.item.fdxCreditTransactionId
-    if (
-      fdxCreditTransactionId !== undefined &&
-      fdxCreditTransactionId !== null &&
-      fdxCreditTransactionId !== ""
-    ) {
-      const entry: ManagerExistingTransferFdxTransactionIdEntry = {
+  for (const interAccountTransfer of input.interAccountTransfers) {
+    appendExistingFdxTransactionIdProjectionEntry({
+      fdxTransactionId: interAccountTransfer.item.fdxCreditTransactionId,
+      buildEntry: (fdxTransactionId): ManagerExistingTransferFdxTransactionIdEntry => ({
         _tag: "interAccountTransfer",
-        fdxTransactionId: fdxCreditTransactionId,
+        fdxTransactionId,
         key: interAccountTransfer.key,
         transferSide: "credit",
         interAccountTransfer,
-      }
-      entries.push(entry)
-      transferEntries.push(entry)
-      appendExistingFdxTransactionIdEntry(mutableIndex, entry)
-      appendExistingFdxTransactionIdEntry(mutableTransferIndex, entry)
-    }
-
-    const fdxDebitTransactionId = interAccountTransfer.item.fdxDebitTransactionId
-    if (
-      fdxDebitTransactionId !== undefined &&
-      fdxDebitTransactionId !== null &&
-      fdxDebitTransactionId !== ""
-    ) {
-      const entry: ManagerExistingTransferFdxTransactionIdEntry = {
+      }),
+      entries,
+      projectionEntries: transferEntries,
+      mutableIndex,
+      mutableProjectionIndex: mutableTransferIndex,
+    })
+    appendExistingFdxTransactionIdProjectionEntry({
+      fdxTransactionId: interAccountTransfer.item.fdxDebitTransactionId,
+      buildEntry: (fdxTransactionId): ManagerExistingTransferFdxTransactionIdEntry => ({
         _tag: "interAccountTransfer",
-        fdxTransactionId: fdxDebitTransactionId,
+        fdxTransactionId,
         key: interAccountTransfer.key,
         transferSide: "debit",
         interAccountTransfer,
-      }
-      entries.push(entry)
-      transferEntries.push(entry)
-      appendExistingFdxTransactionIdEntry(mutableIndex, entry)
-      appendExistingFdxTransactionIdEntry(mutableTransferIndex, entry)
-    }
+      }),
+      entries,
+      projectionEntries: transferEntries,
+      mutableIndex,
+      mutableProjectionIndex: mutableTransferIndex,
+    })
   }
 
   return {
     bankOrCashAccountKey: input.bankOrCashAccountKey,
     receipts: input.receipts,
     payments: input.payments,
-    interAccountTransfers,
+    interAccountTransfers: input.interAccountTransfers,
     existingReceiptPaymentFdxTransactionIdEntries: receiptPaymentEntries,
     existingReceiptPaymentFdxTransactionIdIndex: new Map(mutableReceiptPaymentIndex),
     existingTransferFdxTransactionIdEntries: transferEntries,
