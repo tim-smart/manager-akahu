@@ -277,12 +277,13 @@ Status: Completed.
 
 ### Task 2 Review: Setup Transfer Rule Code Quality Follow-Up
 
-Status: In Progress.
+Status: Completed.
 
 - Completed: Extract setup transfer-rule validation/enrichment out of `apps/website/src/Manager/Flows.ts` before wiring sync freshness. The canonical pure `buildLinkedAccountTransferRules({ sourceAccount, rawValue, managerAccountsByKey })` helper now owns destination lookup, self-target rejection, metadata enrichment, de-duplication, and warning semantics behind a shared Manager bank/cash account metadata type so setup and sync-start refresh can reuse the same behavior.
-- Collapse the custom-field ensure logic into a single canonical bank/cash account text-field helper before adding more setup fields. `ensureAccountField`, `createDropdownField`, `ensureMultilineAccountTextField`, and `createMultilineAccountTextField` now split related field invariants across multiple paths, and the multiline repair path spreads `...field.item` while changing `type`/`placement`, which can preserve stale type-specific data such as dropdown options. Prefer constructing a clean desired payload for create/update from `{ name, type, placement, optionsForDropdownList? }` and using one update path that preserves existing account-level values without carrying obsolete field-shape properties.
-- Add effect-level setup tests for the actual `Akahu Transfer Rules` custom-field create/update behavior, not only the pure `isManagerAkahuTransferRulesFieldCurrent` predicate. Cover missing-field creation, wrong-type repair, wrong-placement repair, and preservation of existing Manager account custom-field values through the field update path.
+- Completed: Collapsed the account custom-field ensure logic into `ensureManagerBankOrCashAccountTextField`, a single create/update helper that builds the desired Manager text-field payload from `{ name, type, placement, optionsForDropdownList? }`. Wrong-type and wrong-placement updates now PUT the existing field key with a clean payload instead of spreading `...field.item`, so dropdown-only properties are not carried onto multiline text fields while existing account-level custom-field values remain keyed to the same field.
+- Completed: Added focused setup tests for missing transfer-rule field creation, wrong-type repair, wrong-placement repair, existing account custom-field value preservation, and continued `Akahu Account` dropdown option refresh behavior.
 - Validation for completed extraction: `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"`, `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm --filter @app/domain build`, `pnpm --filter website build`, and `pnpm ready`.
+- Validation for custom-field ensure refactor: `pnpm test "apps/website/tests/ManagerFlows.test.ts"` and `pnpm --filter website build`.
 
 ### Task 3: Extend Manager Sync Read For Inter-Account Transfers
 

@@ -14,6 +14,7 @@ import {
 import { ApiClient } from "@/ApiClient"
 import type { Account } from "@app/domain/Akahu"
 import { AkahuRpcError } from "@app/domain/rpc"
+import type { Client, ItemOfTextCustomField, TextCustomField } from "@app/manager-api/ManagerClient"
 import {
   decodeManagerAkahuBusinessDetailTokens,
   findManagerAkahuCredentialFields,
@@ -43,6 +44,81 @@ const managerBankOrCashAccountCustomFieldPlacement = [
 ] as const
 const managerMultilineTextCustomFieldType = 1
 const managerDropdownTextCustomFieldType = 2
+
+type ManagerTextCustomFieldClient = Pick<
+  Client,
+  "POST/api4/text-custom-field" | "PUT/api4/text-custom-field"
+>
+
+type EnsureManagerBankOrCashAccountTextFieldOptions = {
+  readonly client: ManagerTextCustomFieldClient
+  readonly getCurrentFields: () => Effect.Effect<ReadonlyArray<ItemOfTextCustomField>, unknown>
+  readonly refreshFields: () => Effect.Effect<void, unknown>
+  readonly name: string
+  readonly type: number
+  readonly placement: ReadonlyArray<string>
+  readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
+}
+
+export const ensureManagerBankOrCashAccountTextField = Effect.fn(
+  "ManagerFlows.ensureManagerBankOrCashAccountTextField",
+)(function* (options: EnsureManagerBankOrCashAccountTextFieldOptions) {
+  const desired = makeManagerBankOrCashAccountTextFieldPayload(options)
+  const current = yield* options.getCurrentFields()
+  let field = current.find((field) => field.item.name === options.name)
+
+  if (!field) {
+    yield* options.client["POST/api4/text-custom-field"]({ value: desired })
+    yield* options.refreshFields()
+    const refreshed = yield* options.getCurrentFields()
+    return refreshed.find((field) => field.item.name === options.name)!
+  }
+
+  if (!isManagerBankOrCashAccountTextFieldCurrent(field.item, desired)) {
+    yield* options.client["PUT/api4/text-custom-field"]({
+      key: field.key,
+      value: desired,
+    })
+    yield* options.refreshFields()
+    const refreshed = yield* options.getCurrentFields()
+    field = refreshed.find((field) => field.item.name === options.name) ?? field
+  }
+
+  return field
+})
+
+const makeManagerBankOrCashAccountTextFieldPayload = (options: {
+  readonly name: string
+  readonly type: number
+  readonly placement: ReadonlyArray<string>
+  readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
+}): TextCustomField => {
+  const payload: TextCustomField = {
+    name: options.name,
+    type: options.type,
+    placement: [...options.placement],
+    excludeFromCopyingOrCloning: true,
+    size: 2,
+  }
+
+  if (options.optionsForDropdownList !== undefined) {
+    return {
+      ...payload,
+      optionsForDropdownList: options.optionsForDropdownList.join("\n"),
+    }
+  }
+
+  return payload
+}
+
+const isManagerBankOrCashAccountTextFieldCurrent = (
+  field: TextCustomField,
+  desired: TextCustomField,
+) =>
+  field.type === desired.type &&
+  sameStringSet(field.placement ?? [], desired.placement ?? []) &&
+  (desired.optionsForDropdownList === undefined ||
+    field.optionsForDropdownList === desired.optionsForDropdownList)
 
 export class ManagerFlows extends Context.Service<
   ManagerFlows,
@@ -93,89 +169,6 @@ export class ManagerFlows extends Context.Service<
         return current.find((field) => field.item.name === name)!
       })
 
-      const ensureAccountField = Effect.fn("ManagerFlows.ensureAccountField")(function* (options: {
-        readonly name: string
-        readonly options: ReadonlyArray<{
-          readonly label: string
-          readonly value: string
-        }>
-      }) {
-        const current = yield* Resource.get(textFields)
-        let field = current.find((field) => field.item.name === options.name)
-        if (!field) {
-          field = yield* createDropdownField(options.name, options.options.map(encodeMultipleValue))
-        } else {
-          yield* client["PUT/api4/text-custom-field"]({
-            key: field.key,
-            value: {
-              ...field.item,
-              optionsForDropdownList: options.options.map(encodeMultipleValue).join("\n"),
-            },
-          })
-        }
-        return field
-      })
-
-      const createDropdownField = Effect.fn("ManagerFlows.createDropdownField")(function* (
-        name: string,
-        options: ReadonlyArray<string>,
-      ) {
-        yield* client["POST/api4/text-custom-field"]({
-          value: {
-            name,
-            type: managerDropdownTextCustomFieldType,
-            placement: managerBankOrCashAccountCustomFieldPlacement,
-            optionsForDropdownList: options.join("\n"),
-            excludeFromCopyingOrCloning: true,
-            size: 2,
-          },
-        })
-        yield* Resource.refresh(textFields)
-        const current = yield* Resource.get(textFields)
-        return current.find((field) => field.item.name === name)!
-      })
-
-      const ensureMultilineAccountTextField = Effect.fn(
-        "ManagerFlows.ensureMultilineAccountTextField",
-      )(function* (name: string) {
-        const current = yield* Resource.get(textFields)
-        let field = current.find((field) => field.item.name === name)
-        if (!field) {
-          field = yield* createMultilineAccountTextField(name)
-        } else if (!isMultilineAccountTextField(field.item)) {
-          yield* client["PUT/api4/text-custom-field"]({
-            key: field.key,
-            value: {
-              ...field.item,
-              name,
-              type: managerMultilineTextCustomFieldType,
-              placement: managerBankOrCashAccountCustomFieldPlacement,
-            },
-          })
-          yield* Resource.refresh(textFields)
-          const refreshed = yield* Resource.get(textFields)
-          field = refreshed.find((field) => field.item.name === name) ?? field
-        }
-        return field
-      })
-
-      const createMultilineAccountTextField = Effect.fn(
-        "ManagerFlows.createMultilineAccountTextField",
-      )(function* (name: string) {
-        yield* client["POST/api4/text-custom-field"]({
-          value: {
-            name,
-            type: managerMultilineTextCustomFieldType,
-            placement: managerBankOrCashAccountCustomFieldPlacement,
-            excludeFromCopyingOrCloning: true,
-            size: 2,
-          },
-        })
-        yield* Resource.refresh(textFields)
-        const current = yield* Resource.get(textFields)
-        return current.find((field) => field.item.name === name)!
-      })
-
       const getAkahuSetupState = Effect.gen(function* () {
         const fields = yield* ensureCustomFields
         const business = yield* client["GET/api4/business-details"]()
@@ -204,16 +197,28 @@ export class ManagerFlows extends Context.Service<
         }
 
         const accounts = accountsResult.accounts
-        const accountField = yield* ensureAccountField({
+        const accountField = yield* ensureManagerBankOrCashAccountTextField({
+          client,
+          getCurrentFields: () => Resource.get(textFields),
+          refreshFields: () => Resource.refresh(textFields),
           name: managerAkahuAccountFieldName,
-          options: accounts.map((account) => ({
-            label: account.name,
-            value: account._id,
-          })),
+          type: managerDropdownTextCustomFieldType,
+          placement: managerBankOrCashAccountCustomFieldPlacement,
+          optionsForDropdownList: accounts.map((account) =>
+            encodeMultipleValue({
+              label: account.name,
+              value: account._id,
+            }),
+          ),
         })
-        const transferRulesField = yield* ensureMultilineAccountTextField(
-          managerAkahuTransferRulesFieldName,
-        )
+        const transferRulesField = yield* ensureManagerBankOrCashAccountTextField({
+          client,
+          getCurrentFields: () => Resource.get(textFields),
+          refreshFields: () => Resource.refresh(textFields),
+          name: managerAkahuTransferRulesFieldName,
+          type: managerMultilineTextCustomFieldType,
+          placement: managerBankOrCashAccountCustomFieldPlacement,
+        })
 
         const managerAccounts = (yield* client["GET/api4/bank-or-cash-account-batch"]()).items ?? []
         const selections = collectManagerAkahuAccountSelections({

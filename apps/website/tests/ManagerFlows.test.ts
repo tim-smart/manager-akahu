@@ -1,13 +1,20 @@
-import { expect, test } from "@effect/vitest"
-import { DateTime } from "effect"
+import { expect, it, test } from "@effect/vitest"
+import { DateTime, Effect } from "effect"
 import { Account, type AccountId } from "@app/domain/Akahu"
 import { makeManagerAkahuSetupState } from "@app/domain/Manager/AkahuCustomFields"
 import { AkahuRpcError } from "@app/domain/rpc"
+import type { Client, ItemOfTextCustomField, TextCustomField } from "@app/manager-api/ManagerClient"
 import {
   collectManagerAkahuAccountSelections,
+  ensureManagerBankOrCashAccountTextField,
   isManagerAkahuTransferRulesFieldCurrent,
+  managerAkahuAccountFieldName,
+  managerAkahuTransferRulesFieldName,
   mapAkahuAccountsReadFailure,
 } from "../src/Manager/Flows.ts"
+
+const managerBankOrCashAccountPlacement = ["1408c33b-6284-4f50-9e31-48cbea21f3cf"] as const
+const managerBusinessPlacement = ["38cf4712-6e95-4ce1-b53a-bff03edad273"] as const
 
 const akahuChecking = new Account({
   _id: "akahu-checking" as AccountId,
@@ -18,6 +25,54 @@ const akahuChecking = new Account({
     party: DateTime.makeUnsafe("2026-06-05T00:00:00.000Z"),
   },
 })
+
+const makeTextCustomField = (key: string, item: TextCustomField): ItemOfTextCustomField => ({
+  key,
+  item,
+  _links: null,
+  _actions: null,
+})
+
+const makeTextCustomFieldEnsureHarness = (initialFields: ReadonlyArray<ItemOfTextCustomField>) => {
+  let fields = [...initialFields]
+  const postPayloads: Array<TextCustomField> = []
+  const putPayloads: Array<{
+    readonly key?: string | undefined
+    readonly value?: TextCustomField
+  }> = []
+  const client: Pick<Client, "POST/api4/text-custom-field" | "PUT/api4/text-custom-field"> = {
+    "POST/api4/text-custom-field": (payload) => {
+      const value = payload.value ?? {}
+      postPayloads.push(value)
+      fields = [...fields, makeTextCustomField(`created-field-${postPayloads.length}`, value)]
+      return Effect.succeed(true)
+    },
+    "PUT/api4/text-custom-field": (payload) => {
+      putPayloads.push({ key: payload.key, value: payload.value })
+      fields = fields.map((field) =>
+        field.key === payload.key ? makeTextCustomField(field.key, payload.value ?? {}) : field,
+      )
+      return Effect.succeed(true)
+    },
+  }
+
+  return {
+    ensure: (options: {
+      readonly name: string
+      readonly type: number
+      readonly placement: ReadonlyArray<string>
+      readonly optionsForDropdownList?: ReadonlyArray<string> | undefined
+    }) =>
+      ensureManagerBankOrCashAccountTextField({
+        client,
+        getCurrentFields: () => Effect.succeed(fields),
+        refreshFields: () => Effect.void,
+        ...options,
+      }),
+    postPayloads,
+    putPayloads,
+  }
+}
 
 test("collects linked Manager accounts with sync setup metadata", () => {
   const selections = collectManagerAkahuAccountSelections({
@@ -224,6 +279,159 @@ test("recognizes current multiline Manager bank/cash transfer-rule fields", () =
   ).toBe(false)
   expect(isManagerAkahuTransferRulesFieldCurrent({ type: 1, placement: [] })).toBe(false)
 })
+
+it.effect("creates missing Akahu Transfer Rules as a multiline bank/cash account field", () =>
+  Effect.gen(function* () {
+    const harness = makeTextCustomFieldEnsureHarness([])
+
+    const field = yield* harness.ensure({
+      name: managerAkahuTransferRulesFieldName,
+      type: 1,
+      placement: managerBankOrCashAccountPlacement,
+    })
+
+    expect(field.key).toBe("created-field-1")
+    expect(harness.postPayloads).toEqual([
+      {
+        name: managerAkahuTransferRulesFieldName,
+        type: 1,
+        placement: [...managerBankOrCashAccountPlacement],
+        excludeFromCopyingOrCloning: true,
+        size: 2,
+      },
+    ])
+    expect(harness.putPayloads).toEqual([])
+  }),
+)
+
+it.effect("repairs wrong-type transfer-rule fields without carrying dropdown options", () =>
+  Effect.gen(function* () {
+    const harness = makeTextCustomFieldEnsureHarness([
+      makeTextCustomField("transfer-rules-field", {
+        name: managerAkahuTransferRulesFieldName,
+        type: 2,
+        placement: [...managerBankOrCashAccountPlacement],
+        optionsForDropdownList: "Old Akahu - old-akahu",
+        description: "existing Manager field metadata",
+      }),
+    ])
+    const managerCheckingAccount = {
+      key: "manager-checking",
+      item: {
+        name: "Manager Checking",
+        customFields2: {
+          strings: {
+            "akahu-field": "Akahu Checking - akahu-checking",
+            "transfer-rules-field": "Coffee,manager-savings",
+          },
+        },
+      },
+    }
+    const managerAccounts = [
+      managerCheckingAccount,
+      { key: "manager-savings", item: { name: "Manager Savings" } },
+    ]
+
+    const field = yield* harness.ensure({
+      name: managerAkahuTransferRulesFieldName,
+      type: 1,
+      placement: managerBankOrCashAccountPlacement,
+    })
+
+    expect(field.key).toBe("transfer-rules-field")
+    expect(harness.putPayloads).toEqual([
+      {
+        key: "transfer-rules-field",
+        value: {
+          name: managerAkahuTransferRulesFieldName,
+          type: 1,
+          placement: [...managerBankOrCashAccountPlacement],
+          excludeFromCopyingOrCloning: true,
+          size: 2,
+        },
+      },
+    ])
+    expect(managerCheckingAccount.item.customFields2.strings["transfer-rules-field"]).toBe(
+      "Coffee,manager-savings",
+    )
+    expect(
+      collectManagerAkahuAccountSelections({
+        accountFieldKey: "akahu-field",
+        transferRulesFieldKey: field.key,
+        akahuAccounts: [akahuChecking],
+        managerAccounts,
+      }).linkedAccounts[0]?.transferRules,
+    ).toMatchObject([{ keyword: "Coffee", destinationAccountKey: "manager-savings" }])
+  }),
+)
+
+it.effect("repairs wrong-placement transfer-rule fields in place", () =>
+  Effect.gen(function* () {
+    const harness = makeTextCustomFieldEnsureHarness([
+      makeTextCustomField("transfer-rules-field", {
+        name: managerAkahuTransferRulesFieldName,
+        type: 1,
+        placement: [...managerBusinessPlacement],
+      }),
+    ])
+
+    const field = yield* harness.ensure({
+      name: managerAkahuTransferRulesFieldName,
+      type: 1,
+      placement: managerBankOrCashAccountPlacement,
+    })
+
+    expect(field.key).toBe("transfer-rules-field")
+    expect(harness.putPayloads).toEqual([
+      {
+        key: "transfer-rules-field",
+        value: {
+          name: managerAkahuTransferRulesFieldName,
+          type: 1,
+          placement: [...managerBankOrCashAccountPlacement],
+          excludeFromCopyingOrCloning: true,
+          size: 2,
+        },
+      },
+    ])
+  }),
+)
+
+it.effect("keeps Akahu Account dropdown option refresh behavior", () =>
+  Effect.gen(function* () {
+    const harness = makeTextCustomFieldEnsureHarness([
+      makeTextCustomField("akahu-field", {
+        name: managerAkahuAccountFieldName,
+        type: 2,
+        placement: [...managerBankOrCashAccountPlacement],
+        optionsForDropdownList: "Old Checking - old-checking",
+      }),
+    ])
+
+    const field = yield* harness.ensure({
+      name: managerAkahuAccountFieldName,
+      type: 2,
+      placement: managerBankOrCashAccountPlacement,
+      optionsForDropdownList: ["Akahu Checking - akahu-checking"],
+    })
+
+    expect(field.key).toBe("akahu-field")
+    expect(harness.postPayloads).toEqual([])
+    expect(harness.putPayloads).toEqual([
+      {
+        key: "akahu-field",
+        value: {
+          name: managerAkahuAccountFieldName,
+          type: 2,
+          placement: [...managerBankOrCashAccountPlacement],
+          optionsForDropdownList: "Akahu Checking - akahu-checking",
+          excludeFromCopyingOrCloning: true,
+          size: 2,
+        },
+      },
+    ])
+  }),
+)
 
 test("maps typed Akahu authentication failures to invalid credentials", () => {
   expect(
