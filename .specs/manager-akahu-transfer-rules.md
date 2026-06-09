@@ -22,7 +22,7 @@ The sync flow must load and validate these rules during setup/sync, match rules 
 
 - `apps/website/src/Manager/Flows.ts` ensures the credential custom fields and the `Akahu Account` dropdown field, then reads Manager bank/cash accounts and builds linked account setup state.
 - `collectManagerAkahuAccountSelections` currently reads only one Manager custom field from `customFields2.strings`: the `Akahu Account` field selected on each bank/cash account.
-- `packages/domain/src/Manager/AkahuCustomFields.ts` models `LinkedAccount`, stale Akahu account selections, and setup-state variants. `LinkedAccount` does not yet carry transfer rules.
+- `packages/domain/src/Manager/AkahuCustomFields.ts` models `LinkedAccount`, stale Akahu account selections, setup-state variants, and the pure `AkahuTransferRule` parser/matcher. `LinkedAccount` does not yet carry transfer rules.
 - `apps/website/src/Manager/SyncFlows.ts` orchestrates sync account-by-account. For each account it reads complete Manager receipts/payments, processes settled Akahu transactions first, then pending transactions when supported.
 - `packages/manager-api/src/ManagerAkahuTransactionSync.ts` contains pure sync helpers for amount normalization, pending fingerprints, duplicate decisions, pending-to-settled matching, stale pending detection, and summary counts.
 - `packages/manager-api/src/ManagerBatchPagination.ts` reads complete receipt/payment batches for one bank/cash account and indexes existing `fdxTransactionId` values.
@@ -244,6 +244,8 @@ Count semantics:
 ## Implementation Plan
 
 ### Task 1: Add Transfer Rule Domain Model And Parser
+
+Status: Completed.
 
 - Add transfer-rule schemas/types to `packages/domain/src/Manager/AkahuCustomFields.ts` or a small adjacent domain module.
 - Implement pure parsing for newline-delimited `keyword,destination account key` rules.
