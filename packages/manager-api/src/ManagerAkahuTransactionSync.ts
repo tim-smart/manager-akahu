@@ -2,9 +2,12 @@ import { BigDecimal, DateTime, Option } from "effect"
 import {
   buildManagerSuspenseImportDecision,
   type ManagerBankAccountCurrencyImportDecision,
+  type ManagerInterAccountTransferPayload,
   type ManagerImportClearance,
   type ManagerLineAmount,
   type ManagerSuspenseImportDecision,
+  managerPendingInterAccountTransferClearanceFields,
+  managerSettledInterAccountTransferClearanceFields,
 } from "./ManagerCompatibility.ts"
 import type {
   ManagerBankOrCashAccountSyncRead,
@@ -13,6 +16,7 @@ import type {
 } from "./ManagerBatchPagination.ts"
 
 export const managerAkahuPendingFingerprintPrefix = "akahu-pending:v1:" as const
+export const managerAkahuTransferPendingFingerprintPrefix = "akahu-transfer-pending:v1:" as const
 
 export const managerAkahuSyncSummaryCountKeys = [
   "settledFetched",
@@ -84,6 +88,81 @@ export interface ManagerAkahuPendingFingerprintInput {
   readonly amount: ManagerAkahuDecimalInput
   readonly description: string
 }
+
+export interface ManagerAkahuTransferRuleInput {
+  readonly sourceAccountKey: string
+  readonly sourceAccountName: string
+  readonly sourceAccountCurrency: string | null
+  readonly sourceAccountCanHavePendingTransactions: boolean
+  readonly keyword: string
+  readonly normalizedKeyword: string
+  readonly destinationAccountKey: string
+  readonly destinationAccountName: string
+  readonly destinationAccountCurrency: string | null
+  readonly destinationAccountCanHavePendingTransactions: boolean
+}
+
+export type ManagerAkahuTransferRuleMatchDecision =
+  | { readonly _tag: "noMatch"; readonly normalizedDescription: string }
+  | {
+      readonly _tag: "match"
+      readonly normalizedDescription: string
+      readonly rule: ManagerAkahuTransferRuleInput
+      readonly ignoredRules: ReadonlyArray<ManagerAkahuTransferRuleInput>
+      readonly warning?: string | undefined
+    }
+
+export type ManagerAkahuTransferSourceSide = "credit" | "debit"
+
+export interface ManagerAkahuPendingTransferFingerprintInput {
+  readonly akahuAccountId: string
+  readonly date: DateTime.DateTime
+  readonly amount: ManagerAkahuDecimalInput
+  readonly description: string
+  readonly rule: ManagerAkahuTransferRuleInput
+}
+
+export type ManagerAkahuPendingTransferFingerprintDecision =
+  | {
+      readonly _tag: "fingerprint"
+      readonly fingerprint: string
+      readonly date: string
+      readonly normalizedAmount: ManagerLineAmount
+      readonly normalizedDescription: string
+      readonly normalizedKeyword: string
+      readonly sourceAccountKey: string
+      readonly destinationAccountKey: string
+    }
+  | { readonly _tag: "unsupported"; readonly warning: string }
+
+export interface ManagerAkahuInterAccountTransferPayloadInput {
+  readonly rule: ManagerAkahuTransferRuleInput
+  readonly date: string
+  readonly signedNormalizedAmount: ManagerLineAmount
+  readonly description: string
+  readonly fdxTransactionId: string
+  readonly clearance: ManagerImportClearance
+}
+
+export interface ManagerAkahuInterAccountTransferClassificationInput {
+  readonly rule: ManagerAkahuTransferRuleInput
+  readonly date: DateTime.DateTime
+  readonly signedAmount: ManagerAkahuDecimalInput
+  readonly description: string
+  readonly fdxTransactionId: string
+  readonly clearance: ManagerImportClearance
+}
+
+export type ManagerAkahuInterAccountTransferClassification =
+  | {
+      readonly _tag: "transfer"
+      readonly signedNormalizedAmount: ManagerLineAmount
+      readonly absoluteNormalizedAmount: ManagerLineAmount
+      readonly sourceTransferSide: ManagerAkahuTransferSourceSide
+      readonly payload: ManagerInterAccountTransferPayload
+    }
+  | { readonly _tag: "zero"; readonly signedNormalizedAmount: ManagerLineAmount }
+  | { readonly _tag: "unsupported"; readonly warning: string }
 
 export type ManagerAkahuSettledDuplicateDecision =
   | {
@@ -236,6 +315,136 @@ export const buildAkahuPendingTransactionFingerprint = (
   }
 }
 
+export const matchManagerAkahuTransferRule = (input: {
+  readonly rules: ReadonlyArray<ManagerAkahuTransferRuleInput>
+  readonly description: string
+}): ManagerAkahuTransferRuleMatchDecision => {
+  const normalizedDescription = normalizeAkahuTransactionDescription(input.description)
+  const matches = input.rules.filter((rule) =>
+    normalizedDescription.includes(rule.normalizedKeyword),
+  )
+  if (matches.length === 0) {
+    return { _tag: "noMatch", normalizedDescription }
+  }
+
+  const ignoredRules = matches.slice(1)
+  return {
+    _tag: "match",
+    normalizedDescription,
+    rule: matches[0],
+    ignoredRules,
+    warning:
+      ignoredRules.length === 0
+        ? undefined
+        : `Transfer rule "${matches[0].keyword}" matched first; ${ignoredRules.length} later matching rule(s) were ignored.`,
+  }
+}
+
+export const buildAkahuPendingTransferFingerprint = (
+  input: ManagerAkahuPendingTransferFingerprintInput,
+): ManagerAkahuPendingTransferFingerprintDecision => {
+  const amount = normalizeManagerAkahuAmount(input.amount)
+  if (amount._tag === "unsupported") {
+    return { _tag: "unsupported", warning: `Unsupported pending transfer amount: ${amount.input}` }
+  }
+
+  const date = DateTime.formatIsoDate(input.date)
+  const normalizedDescription = normalizeAkahuTransactionDescription(input.description)
+  return {
+    _tag: "fingerprint",
+    fingerprint: `${managerAkahuTransferPendingFingerprintPrefix}${input.akahuAccountId}:${input.rule.sourceAccountKey}:${input.rule.destinationAccountKey}:${date}:${amount.amount}:${normalizedDescription}:${input.rule.normalizedKeyword}`,
+    date,
+    normalizedAmount: amount.amount,
+    normalizedDescription,
+    normalizedKeyword: input.rule.normalizedKeyword,
+    sourceAccountKey: input.rule.sourceAccountKey,
+    destinationAccountKey: input.rule.destinationAccountKey,
+  }
+}
+
+export const getManagerAkahuTransferSourceSide = (
+  signedNormalizedAmount: ManagerLineAmount,
+): ManagerAkahuTransferSourceSide => (signedNormalizedAmount.startsWith("-") ? "credit" : "debit")
+
+export const buildManagerAkahuInterAccountTransferPayload = (
+  input: ManagerAkahuInterAccountTransferPayloadInput,
+): ManagerInterAccountTransferPayload => {
+  const sourceTransferSide = getManagerAkahuTransferSourceSide(input.signedNormalizedAmount)
+  const amount = getAbsoluteManagerAkahuAmount(input.signedNormalizedAmount)
+  const clearanceFields =
+    input.clearance._tag === "pending"
+      ? managerPendingInterAccountTransferClearanceFields
+      : managerSettledInterAccountTransferClearanceFields
+
+  return {
+    value: {
+      date: input.date,
+      description: input.description,
+      paidFrom:
+        sourceTransferSide === "credit"
+          ? input.rule.sourceAccountKey
+          : input.rule.destinationAccountKey,
+      receivedIn:
+        sourceTransferSide === "credit"
+          ? input.rule.destinationAccountKey
+          : input.rule.sourceAccountKey,
+      creditAmount: amount,
+      debitAmount: amount,
+      ...clearanceFields,
+      ...(sourceTransferSide === "credit"
+        ? { fdxCreditTransactionId: input.fdxTransactionId }
+        : { fdxDebitTransactionId: input.fdxTransactionId }),
+    },
+  }
+}
+
+export const classifyManagerAkahuInterAccountTransfer = (
+  input: ManagerAkahuInterAccountTransferClassificationInput,
+): ManagerAkahuInterAccountTransferClassification => {
+  const amount = normalizeManagerAkahuAmount(input.signedAmount)
+  if (amount._tag === "unsupported") {
+    return { _tag: "unsupported", warning: `Unsupported transfer amount: ${amount.input}` }
+  }
+  if (isZeroManagerAkahuLineAmount(amount.amount)) {
+    return { _tag: "zero", signedNormalizedAmount: amount.amount }
+  }
+  if (isNonEmptyManagerCurrency(input.rule.destinationAccountCurrency)) {
+    return {
+      _tag: "unsupported",
+      warning: `Skipping transfer to ${input.rule.destinationAccountName}: foreign-currency Manager transfer imports are not verified yet (${input.rule.destinationAccountCurrency}).`,
+    }
+  }
+  if (input.clearance._tag === "pending") {
+    if (!input.rule.sourceAccountCanHavePendingTransactions) {
+      return {
+        _tag: "unsupported",
+        warning: `Skipping pending transfer from ${input.rule.sourceAccountName}: Manager account does not support pending transactions.`,
+      }
+    }
+    if (!input.rule.destinationAccountCanHavePendingTransactions) {
+      return {
+        _tag: "unsupported",
+        warning: `Skipping pending transfer to ${input.rule.destinationAccountName}: Manager account does not support pending transactions.`,
+      }
+    }
+  }
+
+  return {
+    _tag: "transfer",
+    signedNormalizedAmount: amount.amount,
+    absoluteNormalizedAmount: getAbsoluteManagerAkahuAmount(amount.amount),
+    sourceTransferSide: getManagerAkahuTransferSourceSide(amount.amount),
+    payload: buildManagerAkahuInterAccountTransferPayload({
+      rule: input.rule,
+      date: DateTime.formatIsoDate(input.date),
+      signedNormalizedAmount: amount.amount,
+      description: input.description,
+      fdxTransactionId: input.fdxTransactionId,
+      clearance: input.clearance,
+    }),
+  }
+}
+
 export const classifyManagerAkahuSuspenseImport = (
   input: ManagerAkahuSuspenseImportClassificationInput,
 ): ManagerAkahuSuspenseImportClassification => {
@@ -345,12 +554,18 @@ const getEntryBankOrCashAccountKey = (
   entry._tag === "receipt" ? entry.receipt.item.receivedIn : entry.payment.item.paidFrom
 
 const getSignedAmountKind = (amount: ManagerLineAmount): ManagerAkahuTransactionKind | "zero" => {
-  if (/^-?0+\.00$/.test(amount)) {
+  if (isZeroManagerAkahuLineAmount(amount)) {
     return "zero"
   }
 
   return amount.startsWith("-") ? "payment" : "receipt"
 }
+
+const isZeroManagerAkahuLineAmount = (amount: ManagerLineAmount): boolean =>
+  /^-?0+\.00$/.test(amount)
+
+const isNonEmptyManagerCurrency = (currency: string | null): currency is string =>
+  currency !== null && currency.trim() !== ""
 
 export const decidePendingToSettledMatch = (
   input: ManagerAkahuPendingToSettledMatchInput,

@@ -3,7 +3,9 @@ import {
   buildManagerSuspenseImportDecision,
   getManagerBankAccountCurrencyImportDecision,
   ManagerBankAccountClearStatusValue,
+  managerPendingInterAccountTransferClearanceFields,
   managerPendingClearanceFields,
+  managerSettledInterAccountTransferClearanceFields,
   managerSettledClearanceFields,
   type ManagerSuspenseImportDecision,
 } from "../src/index.ts"
@@ -46,6 +48,14 @@ test("records Manager bank account clear status values behind names", () => {
   })
   expect(managerSettledClearanceFields).toEqual({ cleared: 0 })
   expect(managerPendingClearanceFields).toEqual({ cleared: 1 })
+  expect(managerSettledInterAccountTransferClearanceFields).toEqual({
+    creditClearStatus: 0,
+    debitClearStatus: 0,
+  })
+  expect(managerPendingInterAccountTransferClearanceFields).toEqual({
+    creditClearStatus: 1,
+    debitClearStatus: 1,
+  })
 })
 
 test("builds a receipt import decision for positive signed amounts", () => {

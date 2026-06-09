@@ -310,11 +310,15 @@ Status: Completed.
 
 ### Task 4: Add Pure Transfer Payload And Fingerprint Helpers
 
+Status: Completed.
+
 - Add manager-api pure helpers for transfer match classification, transfer-specific pending fingerprints, and settled/pending transfer payload construction.
 - Reuse existing amount normalization and clearance constants.
 - Keep receipt/payment classification behavior unchanged for non-transfer transactions.
 - Add focused tests for settled payloads, pending payloads, negative/positive direction, zero/unsupported skips, pending fingerprint contents, and source/destination pending capability skips.
-- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerCompatibility.test.ts"`, and `pnpm --filter @app/manager-api build`.
+- Completed: Added structural transfer-rule match decisions, transfer-specific pending fingerprints, and pure settled/pending inter-account transfer payload/classification helpers in `packages/manager-api/src/ManagerAkahuTransactionSync.ts`. The helpers intentionally do not wire transfer sync, duplicate handling, merge handling, stale transfer detection, or summary count changes; those remain owned by later tasks.
+- Completed: Added inter-account transfer clearance field constants in `packages/manager-api/src/ManagerCompatibility.ts` so transfer payload helpers reuse the same Manager `onSameDate`/`onLaterDate` status values as receipt/payment imports.
+- Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerCompatibility.test.ts"`, and `pnpm --filter @app/manager-api build`; all passed.
 
 ### Task 5: Add Pure Transfer Duplicate, Merge, Stale, And Count Metadata
 

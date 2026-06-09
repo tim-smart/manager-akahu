@@ -8,7 +8,10 @@ import type {
 import {
   addManagerAkahuSyncSummaryCounts,
   buildAkahuPendingTransactionFingerprint,
+  buildAkahuPendingTransferFingerprint,
+  buildManagerAkahuInterAccountTransferPayload,
   buildManagerBankOrCashAccountSyncRead,
+  classifyManagerAkahuInterAccountTransfer,
   classifyManagerAkahuSuspenseImport,
   decidePendingExactFingerprint,
   decidePendingToSettledMatch,
@@ -17,14 +20,34 @@ import {
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
   managerAkahuPendingFingerprintPrefix,
+  managerAkahuTransferPendingFingerprintPrefix,
   managerAkahuSyncSummaryCountKeys,
+  matchManagerAkahuTransferRule,
   normalizeAkahuTransactionDescription,
   normalizeManagerAkahuAmount,
+  type ManagerAkahuTransferRuleInput,
+  ManagerBankAccountClearStatusValue,
 } from "../src/index.ts"
 
 const bankOrCashAccountKey = "bank-1"
 
 const noExcludedFdxTransactionIds = (): ReadonlySet<string> => new Set()
+
+const transferRule = (
+  input: Partial<ManagerAkahuTransferRuleInput> = {},
+): ManagerAkahuTransferRuleInput => ({
+  sourceAccountKey: input.sourceAccountKey ?? bankOrCashAccountKey,
+  sourceAccountName: input.sourceAccountName ?? "Source Account",
+  sourceAccountCurrency: input.sourceAccountCurrency ?? null,
+  sourceAccountCanHavePendingTransactions: input.sourceAccountCanHavePendingTransactions ?? true,
+  keyword: input.keyword ?? "Transfer",
+  normalizedKeyword: input.normalizedKeyword ?? "transfer",
+  destinationAccountKey: input.destinationAccountKey ?? "bank-2",
+  destinationAccountName: input.destinationAccountName ?? "Destination Account",
+  destinationAccountCurrency: input.destinationAccountCurrency ?? null,
+  destinationAccountCanHavePendingTransactions:
+    input.destinationAccountCanHavePendingTransactions ?? true,
+})
 
 const receiptItem = (key: string, item: ManagerReceiptItem["item"]): ManagerReceiptItem => ({
   key,
@@ -204,6 +227,208 @@ test("normalizes descriptions and generates versioned pending fingerprints", () 
       description: "Unsupported pending",
     }),
   ).toEqual({ _tag: "unsupported", warning: "Unsupported pending amount: not-a-decimal" })
+})
+
+test("matches transfer rules against normalized Akahu descriptions in field order", () => {
+  const first = transferRule({ keyword: "Coffee Shop", normalizedKeyword: "coffee shop" })
+  const ignored = transferRule({
+    keyword: "Shop",
+    normalizedKeyword: "shop",
+    destinationAccountKey: "bank-3",
+    destinationAccountName: "Other Account",
+  })
+
+  expect(
+    matchManagerAkahuTransferRule({
+      rules: [first, ignored],
+      description: "  Paid at COFFEE\nSHOP today  ",
+    }),
+  ).toEqual({
+    _tag: "match",
+    normalizedDescription: "paid at coffee shop today",
+    rule: first,
+    ignoredRules: [ignored],
+    warning: 'Transfer rule "Coffee Shop" matched first; 1 later matching rule(s) were ignored.',
+  })
+
+  expect(
+    matchManagerAkahuTransferRule({ rules: [first], description: "unrelated transaction" }),
+  ).toEqual({ _tag: "noMatch", normalizedDescription: "unrelated transaction" })
+})
+
+test("builds settled inter-account transfer payloads for negative and positive directions", () => {
+  const rule = transferRule()
+
+  expect(
+    buildManagerAkahuInterAccountTransferPayload({
+      rule,
+      date: "2026-06-04",
+      signedNormalizedAmount: "-25.01",
+      description: "Transfer out",
+      fdxTransactionId: "settled-negative",
+      clearance: { _tag: "settled" },
+    }),
+  ).toEqual({
+    value: {
+      date: "2026-06-04",
+      description: "Transfer out",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: "bank-2",
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      fdxCreditTransactionId: "settled-negative",
+    },
+  })
+
+  expect(
+    buildManagerAkahuInterAccountTransferPayload({
+      rule,
+      date: "2026-06-04",
+      signedNormalizedAmount: "18.20",
+      description: "Transfer in",
+      fdxTransactionId: "settled-positive",
+      clearance: { _tag: "settled" },
+    }),
+  ).toEqual({
+    value: {
+      date: "2026-06-04",
+      description: "Transfer in",
+      paidFrom: "bank-2",
+      receivedIn: bankOrCashAccountKey,
+      creditAmount: "18.20",
+      debitAmount: "18.20",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+      fdxDebitTransactionId: "settled-positive",
+    },
+  })
+})
+
+test("classifies pending transfers with pending clear statuses when both accounts support pending", () => {
+  const decision = classifyManagerAkahuInterAccountTransfer({
+    rule: transferRule(),
+    date: DateTime.makeUnsafe("2026-06-04"),
+    signedAmount: "-12.345",
+    description: "Pending transfer",
+    fdxTransactionId: "pending-transfer",
+    clearance: { _tag: "pending" },
+  })
+
+  expect(decision._tag).toBe("transfer")
+  if (decision._tag !== "transfer") {
+    throw new Error(`Expected transfer, got ${decision._tag}`)
+  }
+  expect(decision.signedNormalizedAmount).toBe("-12.35")
+  expect(decision.absoluteNormalizedAmount).toBe("12.35")
+  expect(decision.sourceTransferSide).toBe("credit")
+  expect(decision.payload).toEqual({
+    value: {
+      date: "2026-06-04",
+      description: "Pending transfer",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: "bank-2",
+      creditAmount: "12.35",
+      debitAmount: "12.35",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      fdxCreditTransactionId: "pending-transfer",
+    },
+  })
+  expect("creditClearDate" in decision.payload.value).toBe(false)
+  expect("debitClearDate" in decision.payload.value).toBe(false)
+})
+
+test("generates transfer-specific pending fingerprints with transfer rule context", () => {
+  const decision = buildAkahuPendingTransferFingerprint({
+    akahuAccountId: "akahu-account-1",
+    date: DateTime.makeZonedUnsafe("2026-06-05T00:30:00.000+13:00"),
+    amount: "-20.005",
+    description: "  Loan\nPayment  ",
+    rule: transferRule({ normalizedKeyword: "loan" }),
+  })
+
+  expect(decision).toEqual({
+    _tag: "fingerprint",
+    fingerprint:
+      "akahu-transfer-pending:v1:akahu-account-1:bank-1:bank-2:2026-06-04:-20.01:loan payment:loan",
+    date: "2026-06-04",
+    normalizedAmount: "-20.01",
+    normalizedDescription: "loan payment",
+    normalizedKeyword: "loan",
+    sourceAccountKey: bankOrCashAccountKey,
+    destinationAccountKey: "bank-2",
+  })
+  if (decision._tag !== "fingerprint") {
+    throw new Error(`Expected fingerprint, got ${decision._tag}`)
+  }
+  expect(decision.fingerprint.startsWith(managerAkahuTransferPendingFingerprintPrefix)).toBe(true)
+  expect(decision.fingerprint.startsWith(managerAkahuPendingFingerprintPrefix)).toBe(false)
+
+  expect(
+    buildAkahuPendingTransferFingerprint({
+      akahuAccountId: "akahu-account-1",
+      date: DateTime.makeUnsafe("2026-06-04"),
+      amount: "not-a-decimal",
+      description: "Unsupported transfer",
+      rule: transferRule(),
+    }),
+  ).toEqual({ _tag: "unsupported", warning: "Unsupported pending transfer amount: not-a-decimal" })
+})
+
+test("skips transfer imports for zero amounts, invalid amounts, foreign destinations, and pending capability gaps", () => {
+  const input = {
+    rule: transferRule(),
+    date: DateTime.makeUnsafe("2026-06-04"),
+    description: "Transfer",
+    fdxTransactionId: "tx-1",
+    clearance: { _tag: "settled" } as const,
+  }
+
+  expect(classifyManagerAkahuInterAccountTransfer({ ...input, signedAmount: "0.004" })).toEqual({
+    _tag: "zero",
+    signedNormalizedAmount: "0.00",
+  })
+  expect(classifyManagerAkahuInterAccountTransfer({ ...input, signedAmount: "bad" })).toEqual({
+    _tag: "unsupported",
+    warning: "Unsupported transfer amount: bad",
+  })
+  expect(
+    classifyManagerAkahuInterAccountTransfer({
+      ...input,
+      rule: transferRule({ destinationAccountCurrency: "USD" }),
+      signedAmount: "10.00",
+    }),
+  ).toEqual({
+    _tag: "unsupported",
+    warning:
+      "Skipping transfer to Destination Account: foreign-currency Manager transfer imports are not verified yet (USD).",
+  })
+  expect(
+    classifyManagerAkahuInterAccountTransfer({
+      ...input,
+      rule: transferRule({ sourceAccountCanHavePendingTransactions: false }),
+      signedAmount: "10.00",
+      clearance: { _tag: "pending" },
+    }),
+  ).toEqual({
+    _tag: "unsupported",
+    warning:
+      "Skipping pending transfer from Source Account: Manager account does not support pending transactions.",
+  })
+  expect(
+    classifyManagerAkahuInterAccountTransfer({
+      ...input,
+      rule: transferRule({ destinationAccountCanHavePendingTransactions: false }),
+      signedAmount: "10.00",
+      clearance: { _tag: "pending" },
+    }),
+  ).toEqual({
+    _tag: "unsupported",
+    warning:
+      "Skipping pending transfer to Destination Account: Manager account does not support pending transactions.",
+  })
 })
 
 test("uses the canonical Manager sync-read fdxTransactionId entries and index", () => {
