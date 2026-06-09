@@ -1,14 +1,16 @@
 Perform a deep code quality audit of the current task (task details below).
 
-**AVOID REVIEWING THE SAME TASK MULTIPLE TIMES**. If a task has already had a round of feedback, try not to review it again.
+Only perform this review if the current parent task has not already been reviewed.
+A parent task is something like "Task 1" - "Task 1A" or "Task 1 review" is NOT a parent task but instead a subtask.
+If the parent task has already been reviewed, then STOP and go no further.
 
 Rethink how to structure / implement the changes to meaningfully improve code quality without impacting behavior.
 Work to improve abstractions, modularity, reduce Spaghetti code, improve succinctness and legibility.
 Be ambitious, if there is a clear path to improving the implementation that involves restructuring some of the codebase, go for it.
 Be extremely thorough and rigorous. Measure twice, cut once.
 
-After your review, add the feedback as a follow up task to the specification.
-The follow up task should be added directly after the original task, and should be a new task.
+After your review, add the feedback as a follow up task to the specification
+(directly after the current task) or update the task description if not specification is linked.
 
 If using sub-agents, ask them to also review the `LALPH_REVIEW.md` file.
 
