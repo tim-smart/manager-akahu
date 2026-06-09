@@ -16,6 +16,7 @@ import {
   classifyManagerAkahuInterAccountTransfer,
   classifyManagerAkahuSuspenseImport,
   decidePendingExactFingerprint,
+  decidePendingTransferToSettledMatch,
   decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
   decideStalePendingEntries,
@@ -833,6 +834,35 @@ const processManagerAkahuSettledTransferTransaction = Effect.fn(
 
   switch (duplicateDecision._tag) {
     case "create": {
+      const pendingReplacementDecision = decidePendingTransferToSettledMatch({
+        syncRead: input.syncRead,
+        sourceTransferSide: input.classification.sourceTransferSide,
+        payload: input.classification.payload,
+        excludedFdxTransactionIds: accountState.processedFdxTransactionIds,
+      })
+
+      switch (pendingReplacementDecision._tag) {
+        case "match":
+          accountState = yield* updateManagerAkahuSettledPendingTransfer({
+            state: accountState,
+            client: input.client,
+            fdxTransactionId: input.transaction._id,
+            pendingFdxTransactionId: pendingReplacementDecision.pendingFdxTransactionId,
+            classification: input.classification,
+            transfer: pendingReplacementDecision.transfer,
+          })
+          return continueManagerAkahuSettledPhase({ ...input.state, accountState })
+        case "ambiguous":
+          accountState = addManagerAkahuTransactionSyncAccountWarningSkip(
+            accountState,
+            pendingReplacementDecision.warning,
+            "duplicatesSkipped",
+          )
+          return continueManagerAkahuSettledPhase({ ...input.state, accountState })
+        case "none":
+          break
+      }
+
       const mirrorDecision = selectManagerAkahuMirroredTransferCandidate({
         syncRead: input.syncRead,
         sourceTransferSide: input.classification.sourceTransferSide,
@@ -903,6 +933,39 @@ const createManagerAkahuTransfer = Effect.fn("createManagerAkahuTransfer")(funct
   return addManagerAkahuTransactionSyncAccountSuccessfulWrite(input.state, {
     processedFdxTransactionIds: [input.fdxTransactionId],
     successCounts: ["transfersCreated"],
+  })
+})
+
+const updateManagerAkahuSettledPendingTransfer = Effect.fn(
+  "updateManagerAkahuSettledPendingTransfer",
+)(function* (input: {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly client: ManagerAkahuTransactionSyncManagerClient
+  readonly fdxTransactionId: string
+  readonly pendingFdxTransactionId: string
+  readonly classification: ManagerAkahuTransferCreateClassification
+  readonly transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+}) {
+  const writeResult = yield* input.client["PUT/api4/inter-account-transfer"](
+    buildManagerAkahuSettledMirroredTransferUpdatePayload({
+      transfer: input.transfer,
+      sourceTransferSide: input.classification.sourceTransferSide,
+      fdxTransactionId: input.fdxTransactionId,
+    }),
+  ).pipe(
+    Effect.as({ _tag: "updated" as const }),
+    Effect.catch((error) =>
+      Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+    ),
+  )
+
+  if (writeResult._tag === "error") {
+    return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
+  }
+
+  return addManagerAkahuTransactionSyncAccountSuccessfulWrite(input.state, {
+    processedFdxTransactionIds: [input.pendingFdxTransactionId, input.fdxTransactionId],
+    successCounts: ["transfersUpdated", "pendingSettled"],
   })
 })
 

@@ -888,6 +888,71 @@ it.effect("preserves existing Manager transfer fields during settled mirror merg
   }),
 )
 
+it.effect("replaces a matching pending transfer side with the settled Akahu transfer ID", () =>
+  Effect.gen(function* () {
+    const pendingFdxTransactionId =
+      "akahu-transfer-pending:v1:akahu-checking:manager-checking:manager-savings:2026-06-03:-25.01:transfer%20to%20savings:transfer%20to%20savings"
+    const existingTransfer = makeManagerInterAccountTransfer("existing-pending-transfer", {
+      date: "2026-06-03",
+      reference: "pending-reference",
+      description: "Transfer   to Savings",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: destinationBankOrCashAccountKey,
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearDate: "2026-06-04",
+      customFields2: { strings: { note: "preserve pending metadata" } },
+      fdxCreditTransactionId: pendingFdxTransactionId,
+      fdxDebitTransactionId: "opposite-side-id",
+    })
+    const { client, interAccountTransferPayloads, interAccountTransferPutPayloads } =
+      makeMockClient({
+        receipts: [],
+        interAccountTransfers: [existingTransfer],
+        managerAccounts: makeDefaultManagerAccounts("Transfer to savings, manager-savings"),
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction(
+            "settled-transfer-replaces-pending",
+            "-25.01",
+            "transfer to savings",
+          ),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(interAccountTransferPutPayloads).toEqual([
+      {
+        key: "existing-pending-transfer",
+        value: {
+          ...existingTransfer.item,
+          creditClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          fdxCreditTransactionId: "settled-transfer-replaces-pending",
+        },
+      },
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      transferRulesMatched: 1,
+      transfersCreated: 0,
+      transfersUpdated: 1,
+      transfersMerged: 0,
+      pendingSettled: 1,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
 it.effect("warns when settled transfer matches were already imported as receipts or payments", () =>
   Effect.gen(function* () {
     const existingReceipt: ItemOfReceipt = {

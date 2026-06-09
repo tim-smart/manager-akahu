@@ -386,7 +386,7 @@ Status: Completed.
 
 ### Task 7: Wire Settled Mirror Merge And Pending Replacement
 
-Status: In Progress.
+Status: Completed.
 
 - Use the safe mirrored-candidate helper to update an existing Manager transfer with the current side FDX instead of creating a second transfer.
 - Preserve existing transfer fields when adding the missing current-side FDX.
@@ -397,7 +397,8 @@ Status: In Progress.
 - Completed: Ambiguous settled mirrored candidates now continue to skip with the pure helper's ambiguous merge warning surfaced through the account summary.
 - Completed: Website sync-flow tests cover successful settled mirror merge, ambiguous merge warning, same-run sync-all merge after an earlier account creates the opposite side, and field preservation during merge.
 - Discovery: Same-run sync-all mirror merging depends on later per-account sync reads seeing transfers created by earlier accounts in the same run. The focused test harness now records POST-created transfers in its mock batch read so this behavior is covered without adding cross-account in-memory sync state.
-- Remaining: settled-to-pending transfer replacement is not implemented in this step and still needs focused coverage.
+- Completed: Settled matched transfer sync now detects exactly one safe pending inter-account transfer candidate before mirror-merge/create, using the same three-day pending-to-settled date window as receipt/payment replacement plus transfer direction, absolute credit/debit amount, and normalized description matching. The update starts from the existing Manager transfer item, replaces only the current side's pending transfer FDX value with the settled Akahu transaction ID, updates only that side's settled clear status, records both FDX IDs as processed, and increments `transfersUpdated` plus aggregate `pendingSettled`.
+- Completed: Added focused `ManagerSyncFlows` coverage proving settled replacement preserves unrelated transfer fields, preserves the opposite transfer side, avoids creating a new transfer, and updates replacement counts.
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
 ### Task 7 Review: Settled Mirror Merge Code Quality Follow-Up

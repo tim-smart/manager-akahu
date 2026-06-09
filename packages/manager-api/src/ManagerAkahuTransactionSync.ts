@@ -231,6 +231,30 @@ export interface ManagerAkahuSettledMirroredTransferUpdatePayloadInput {
   readonly fdxTransactionId: string
 }
 
+export interface ManagerAkahuPendingTransferToSettledMatchInput {
+  readonly syncRead: Pick<ManagerBankOrCashAccountSyncRead, "interAccountTransfers">
+  readonly sourceTransferSide: ManagerAkahuTransferSourceSide
+  readonly payload: ManagerInterAccountTransferPayload
+  readonly excludedFdxTransactionIds: ReadonlySet<string>
+  readonly dateWindowDays?: number | undefined
+}
+
+export type ManagerAkahuPendingTransferToSettledMatchDecision =
+  | {
+      readonly _tag: "match"
+      readonly transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+      readonly pendingFdxTransactionId: string
+    }
+  | { readonly _tag: "none" }
+  | {
+      readonly _tag: "ambiguous"
+      readonly candidates: ReadonlyArray<{
+        readonly transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+        readonly pendingFdxTransactionId: string
+      }>
+      readonly warning: string
+    }
+
 export interface ManagerAkahuInterAccountTransferUpdatePayload extends Omit<
   ManagerPutInterAccountTransfer,
   "key" | "value"
@@ -772,6 +796,73 @@ export const buildManagerAkahuSettledMirroredTransferUpdatePayload = (
     key: input.transfer.key,
     value,
   }
+}
+
+export const decidePendingTransferToSettledMatch = (
+  input: ManagerAkahuPendingTransferToSettledMatchInput,
+): ManagerAkahuPendingTransferToSettledMatchDecision => {
+  const payload = input.payload.value
+  const settledDay = DateTime.makeUnsafe(payload.date)
+  const settledDayNumber = dateTimeDayNumber(settledDay)
+  const dateWindowDays = input.dateWindowDays ?? 3
+  const settledDescription = normalizeAkahuTransferRuleText(payload.description)
+  const candidates: Array<{
+    readonly transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+    readonly pendingFdxTransactionId: string
+  }> = []
+
+  for (const transfer of input.syncRead.interAccountTransfers) {
+    const pendingFdxTransactionId = getTransferSideFdxTransactionId(
+      transfer,
+      input.sourceTransferSide,
+    )
+    if (pendingFdxTransactionId == null || pendingFdxTransactionId === "") {
+      continue
+    }
+    if (!isAkahuTransferPendingFdxTransactionId(pendingFdxTransactionId)) {
+      continue
+    }
+    if (input.excludedFdxTransactionIds.has(pendingFdxTransactionId)) {
+      continue
+    }
+
+    const item = transfer.item
+    if (item.paidFrom !== payload.paidFrom || item.receivedIn !== payload.receivedIn) {
+      continue
+    }
+    if (
+      normalizeManagerInterAccountTransferReadAmount(item.creditAmount) !== payload.creditAmount ||
+      normalizeManagerInterAccountTransferReadAmount(item.debitAmount) !== payload.debitAmount
+    ) {
+      continue
+    }
+    if (normalizeAkahuTransferRuleText(item.description ?? "") !== settledDescription) {
+      continue
+    }
+
+    const transferDate = typeof item.date === "string" ? DateTime.makeUnsafe(item.date) : undefined
+    if (
+      transferDate === undefined ||
+      Math.abs(dateTimeDayNumber(transferDate) - settledDayNumber) > dateWindowDays
+    ) {
+      continue
+    }
+
+    candidates.push({ transfer, pendingFdxTransactionId })
+  }
+
+  if (candidates.length === 1) {
+    return { _tag: "match", ...candidates[0] }
+  }
+  if (candidates.length > 1) {
+    return {
+      _tag: "ambiguous",
+      candidates,
+      warning: `Found ${candidates.length} possible pending Manager inter-account transfers for settled transaction replacement.`,
+    }
+  }
+
+  return { _tag: "none" }
 }
 
 export const decidePendingExactFingerprint = (
