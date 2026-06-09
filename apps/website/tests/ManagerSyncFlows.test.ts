@@ -18,10 +18,12 @@ import type {
   ItemOfPayment,
   ItemOfReceipt,
 } from "@app/manager-api/ManagerClient"
-import { BigDecimal, DateTime, Effect, Redacted, Schema, Stream } from "effect"
+import { BigDecimal, DateTime, Effect, Option, Redacted, Schema, Stream } from "effect"
 import { expect, it } from "@effect/vitest"
 import {
   syncManagerAkahuTransactions,
+  type ManagerAkahuPendingTransactionRequest,
+  type ManagerAkahuSettledTransactionRequest,
   type ManagerAkahuTransactionSyncManagerClient,
 } from "../src/Manager/SyncFlows.ts"
 
@@ -58,18 +60,32 @@ const akahuSavingsAccount = new Account({
   },
 })
 
-const linkedAccount = new LinkedAccount({
-  key: bankOrCashAccountKey,
-  name: "Manager Checking",
-  currency: null,
-  canHavePendingTransactions: true,
-  akahuAccount,
-  transferRules: [],
-  transferRuleWarnings: [],
-})
+const makeLinkedAccount = (
+  options: {
+    readonly key?: string
+    readonly name?: string
+    readonly currency?: string | null
+    readonly canHavePendingTransactions?: boolean
+    readonly akahuStartDate?: Option.Option<DateTime.Utc>
+    readonly akahuAccount?: Account
+    readonly transferRules?: ReadonlyArray<LinkedAccountTransferRule>
+    readonly transferRuleWarnings?: ReadonlyArray<string>
+  } = {},
+) =>
+  new LinkedAccount({
+    key: options.key ?? bankOrCashAccountKey,
+    name: options.name ?? "Manager Checking",
+    currency: options.currency ?? null,
+    canHavePendingTransactions: options.canHavePendingTransactions ?? true,
+    akahuStartDate: options.akahuStartDate ?? Option.none(),
+    akahuAccount: options.akahuAccount ?? akahuAccount,
+    transferRules: options.transferRules ?? [],
+    transferRuleWarnings: options.transferRuleWarnings ?? [],
+  })
 
-const linkedAccountWithSetupTimeTransferRule = new LinkedAccount({
-  ...linkedAccount,
+const linkedAccount = makeLinkedAccount()
+
+const linkedAccountWithSetupTimeTransferRule = makeLinkedAccount({
   transferRules: [
     new LinkedAccountTransferRule({
       sourceAccountKey: bankOrCashAccountKey,
@@ -84,33 +100,24 @@ const linkedAccountWithSetupTimeTransferRule = new LinkedAccount({
       destinationAccountCanHavePendingTransactions: true,
     }),
   ],
-  transferRuleWarnings: [],
 })
 
-const linkedSavingsAccount = new LinkedAccount({
+const linkedSavingsAccount = makeLinkedAccount({
   key: destinationBankOrCashAccountKey,
   name: "Manager Savings",
-  currency: null,
-  canHavePendingTransactions: true,
   akahuAccount: akahuSavingsAccount,
-  transferRules: [],
-  transferRuleWarnings: [],
 })
 
-const unsupportedForeignCurrencyLinkedAccount = new LinkedAccount({
+const unsupportedForeignCurrencyLinkedAccount = makeLinkedAccount({
   key: "manager-usd-checking",
   name: "Manager USD Checking",
   currency: "USD",
-  canHavePendingTransactions: true,
-  akahuAccount,
-  transferRules: [],
-  transferRuleWarnings: [],
 })
 
 const zeroPendingFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:0.00:zero coffee"
-const akahuTransactionDate = DateTime.makeUnsafe("2026-06-05T00:00:00.000Z").pipe(
-  DateTime.setZoneNamedUnsafe("Pacific/Auckland"),
-)
+const makeAkahuTransactionDate = (date: string) =>
+  DateTime.makeUnsafe(`${date}T00:00:00.000Z`).pipe(DateTime.setZoneNamedUnsafe("Pacific/Auckland"))
+const akahuTransactionDate = makeAkahuTransactionDate("2026-06-05")
 
 const existingZeroPendingReceipt: ItemOfReceipt = {
   key: "receipt-existing-zero-pending",
@@ -126,6 +133,27 @@ const existingZeroPendingReceipt: ItemOfReceipt = {
   _links: null,
   _actions: null,
 }
+
+const makeExistingPendingReceipt = (input: {
+  readonly key: string
+  readonly fdxTransactionId: string
+  readonly date: string
+  readonly description: string
+  readonly amount?: string
+}): ItemOfReceipt => ({
+  key: input.key,
+  item: {
+    date: input.date,
+    reference: input.fdxTransactionId,
+    cleared: 1,
+    description: input.description,
+    fdxTransactionId: input.fdxTransactionId,
+    lines: [{ amount: input.amount ?? "1.00", lineDescription: input.description }],
+    receivedIn: bankOrCashAccountKey,
+  },
+  _links: null,
+  _actions: null,
+})
 
 const zeroPendingTransaction = new PendingTransaction({
   _account: accountId,
@@ -152,15 +180,25 @@ const makeSettledTransactionForAccount = (
     amount: BigDecimal.fromStringUnsafe(amount),
   })
 
-const makeSettledTransaction = (id: string, amount: string, description = `Settled ${id}`) =>
-  makeSettledTransactionForAccount(id, accountId, amount, description)
+const makeSettledTransaction = (id: string, amount: string, descriptionOrDate = `Settled ${id}`) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(descriptionOrDate)
+    ? new Transaction({
+        _id: id,
+        _account: accountId,
+        _user: userId,
+        _connection: connectionId,
+        date: makeAkahuTransactionDate(descriptionOrDate),
+        description: `Settled ${id}`,
+        amount: BigDecimal.fromStringUnsafe(amount),
+      })
+    : makeSettledTransactionForAccount(id, accountId, amount, descriptionOrDate)
 
-const makePendingTransaction = (description: string, amount: string) =>
+const makePendingTransaction = (description: string, amount: string, date = "2026-06-05") =>
   new PendingTransaction({
     _account: accountId,
     _user: userId,
     _connection: connectionId,
-    date: akahuTransactionDate,
+    date: makeAkahuTransactionDate(date),
     description,
     amount: BigDecimal.fromStringUnsafe(amount),
   })
@@ -333,6 +371,131 @@ const makeMockClient = (options?: {
     interAccountTransferPutPayloads,
   }
 }
+
+it.effect("processes settled transactions on or after the start date and ignores older rows", () =>
+  Effect.gen(function* () {
+    const startDate = DateTime.makeUnsafe("2026-06-04")
+    const account = makeLinkedAccount({
+      canHavePendingTransactions: false,
+      akahuStartDate: Option.some(startDate),
+    })
+    const { client, receiptPayloads } = makeMockClient({ receipts: [] })
+    const settledRequests: Array<ManagerAkahuSettledTransactionRequest> = []
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [account],
+      client,
+      tokens,
+      fetchSettledTransactions: (request) => {
+        settledRequests.push(request)
+        return Stream.fromIterable([
+          makeSettledTransaction("settled-before", "1.00", "2026-06-03"),
+          makeSettledTransaction("settled-on-date", "2.00", "2026-06-04"),
+          makeSettledTransaction("settled-newer", "3.00", "2026-06-05"),
+        ])
+      },
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    const requestedStart = settledRequests[0]?.start
+    expect(requestedStart ? DateTime.formatIsoDate(requestedStart) : undefined).toBe("2026-06-04")
+    expect(
+      receiptPayloads.map(
+        (payload) => (payload as { value: { fdxTransactionId: string } }).value.fdxTransactionId,
+      ),
+    ).toEqual(["settled-on-date", "settled-newer"])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 2,
+      receiptsCreated: 2,
+      duplicatesSkipped: 0,
+      unsupportedSkipped: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("processes pending transactions on or after the start date and ignores older rows", () =>
+  Effect.gen(function* () {
+    const startDate = DateTime.makeUnsafe("2026-06-04")
+    const account = makeLinkedAccount({ akahuStartDate: Option.some(startDate) })
+    const { client, receiptPayloads } = makeMockClient({ receipts: [] })
+    const pendingRequests: Array<ManagerAkahuPendingTransactionRequest> = []
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [account],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: (request) => {
+        pendingRequests.push(request)
+        return Stream.fromIterable([
+          makePendingTransaction("Before Pending", "1.00", "2026-06-03"),
+          makePendingTransaction("On Date Pending", "2.00", "2026-06-04"),
+          makePendingTransaction("Newer Pending", "3.00", "2026-06-05"),
+        ])
+      },
+    })
+
+    expect("start" in (pendingRequests[0] ?? {})).toBe(false)
+    expect(
+      receiptPayloads.map(
+        (payload) => (payload as { value: { fdxTransactionId: string } }).value.fdxTransactionId,
+      ),
+    ).toEqual([
+      "akahu-pending:v1:akahu-checking:2026-06-04:2.00:on date pending",
+      "akahu-pending:v1:akahu-checking:2026-06-05:3.00:newer pending",
+    ])
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 2,
+      pendingCreated: 2,
+      receiptsCreated: 2,
+      duplicatesSkipped: 0,
+      unsupportedSkipped: 0,
+      stalePendingDetected: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("ignores pre-start Manager pending entries during stale pending detection", () =>
+  Effect.gen(function* () {
+    const startDate = DateTime.makeUnsafe("2026-06-04")
+    const account = makeLinkedAccount({ akahuStartDate: Option.some(startDate) })
+    const { client } = makeMockClient({
+      receipts: [
+        makeExistingPendingReceipt({
+          key: "receipt-pre-start-stale",
+          fdxTransactionId: "akahu-pending:v1:akahu-checking:2026-06-03:1.00:pre start",
+          date: "2026-06-03",
+          description: "Pre Start",
+        }),
+        makeExistingPendingReceipt({
+          key: "receipt-on-date-stale",
+          fdxTransactionId: "akahu-pending:v1:akahu-checking:2026-06-04:1.00:on date",
+          date: "2026-06-04",
+          description: "On Date",
+        }),
+      ],
+    })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [account],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(summary.accounts[0]?.warnings).toEqual([
+      "Stale Akahu pending Manager receipt receipt-on-date-stale (akahu-pending:v1:akahu-checking:2026-06-04:1.00:on date) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.",
+    ])
+    expect(summary.overall).toMatchObject({
+      stalePendingDetected: 1,
+      warnings: 1,
+      errors: 0,
+    })
+  }),
+)
 
 it.effect("does not report fingerprinted zero-amount pending rows as stale", () =>
   Effect.gen(function* () {

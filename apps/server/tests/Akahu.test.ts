@@ -12,6 +12,7 @@ const credentials = {
   akahuUserToken: Redacted.make("user-token"),
 }
 const accountId = Schema.decodeSync(AccountId)("acc_1")
+const start = Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-01-01")
 
 interface ExpectedAkahuRequest {
   readonly method: string
@@ -212,6 +213,35 @@ it.effect("AccountTransactions streams full settled history across cursor pages"
         ),
     )
     expect(result.map((item) => item._id)).toEqual(["txn_1", "txn_2", "txn_3"])
+  }),
+)
+
+it.effect("AccountTransactions forwards start across settled cursor pages", () =>
+  Effect.gen(function* () {
+    const result = yield* runWithMockAkahu(
+      [
+        {
+          request: expectedAkahuRequest({
+            pathname: "/v1/accounts/acc_1/transactions",
+            query: { start: "2026-01-01T00:00:00.000Z" },
+          }),
+          response: page([settledTransaction("txn_1")], "settled-page-2"),
+        },
+        {
+          request: expectedAkahuRequest({
+            pathname: "/v1/accounts/acc_1/transactions",
+            query: { start: "2026-01-01T00:00:00.000Z", cursor: "settled-page-2" },
+          }),
+          response: page([settledTransaction("txn_2")], null),
+        },
+      ],
+      (client) =>
+        client.AccountTransactions({ ...credentials, accountId, start }).pipe(
+          Stream.runCollect,
+          Effect.map((items) => Array.from(items)),
+        ),
+    )
+    expect(result.map((item) => item._id)).toEqual(["txn_1", "txn_2"])
   }),
 )
 

@@ -15,6 +15,7 @@ import {
 
 const managerBankOrCashAccountPlacement = ["1408c33b-6284-4f50-9e31-48cbea21f3cf"] as const
 const managerBusinessPlacement = ["38cf4712-6e95-4ce1-b53a-bff03edad273"] as const
+const akahuStartDateFieldKey = "akahu-start-date-field"
 
 const akahuChecking = new Account({
   _id: "akahu-checking" as AccountId,
@@ -78,6 +79,7 @@ test("collects linked Manager accounts with sync setup metadata", () => {
   const selections = collectManagerAkahuAccountSelections({
     accountFieldKey: "akahu-field",
     transferRulesFieldKey: "transfer-rules-field",
+    akahuStartDateFieldKey,
     akahuAccounts: [akahuChecking],
     managerAccounts: [
       {
@@ -114,6 +116,7 @@ test("collects stale Manager Akahu account selections separately", () => {
   const selections = collectManagerAkahuAccountSelections({
     accountFieldKey: "akahu-field",
     transferRulesFieldKey: "transfer-rules-field",
+    akahuStartDateFieldKey,
     akahuAccounts: [akahuChecking],
     managerAccounts: [
       {
@@ -148,6 +151,7 @@ test("classifies setup state from Akahu account and Manager link availability", 
   const staleSelections = collectManagerAkahuAccountSelections({
     accountFieldKey: "akahu-field",
     transferRulesFieldKey: "transfer-rules-field",
+    akahuStartDateFieldKey,
     akahuAccounts: [akahuChecking],
     managerAccounts: [
       {
@@ -185,6 +189,7 @@ test("classifies setup state from Akahu account and Manager link availability", 
       ...collectManagerAkahuAccountSelections({
         accountFieldKey: "akahu-field",
         transferRulesFieldKey: "transfer-rules-field",
+        akahuStartDateFieldKey,
         akahuAccounts: [akahuChecking],
         managerAccounts: [
           {
@@ -213,6 +218,7 @@ test("parses linked-account transfer rules and non-blocking warnings", () => {
   const selections = collectManagerAkahuAccountSelections({
     accountFieldKey: "akahu-field",
     transferRulesFieldKey: "transfer-rules-field",
+    akahuStartDateFieldKey,
     akahuAccounts: [akahuChecking],
     managerAccounts: [
       {
@@ -358,6 +364,7 @@ it.effect("repairs wrong-type transfer-rule fields without carrying dropdown opt
       collectManagerAkahuAccountSelections({
         accountFieldKey: "akahu-field",
         transferRulesFieldKey: field.key,
+        akahuStartDateFieldKey,
         akahuAccounts: [akahuChecking],
         managerAccounts,
       }).linkedAccounts[0]?.transferRules,

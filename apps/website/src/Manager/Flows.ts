@@ -1,5 +1,5 @@
 import { Manager } from "@/Manager"
-import { Context, Effect, Layer, Resource } from "effect"
+import { Context, DateTime, Effect, Layer, Resource } from "effect"
 import {
   buildLinkedAccountTransferRules,
   LinkedAccount,
@@ -13,6 +13,7 @@ import {
 } from "@app/domain/Manager/AkahuCustomFields"
 import { ApiClient } from "@/ApiClient"
 import type { Account } from "@app/domain/Akahu"
+import type { DateCustomField, ItemOfDateCustomField } from "@app/manager-api/ManagerClient"
 import { AkahuRpcError } from "@app/domain/rpc"
 import type { Client, ItemOfTextCustomField, TextCustomField } from "@app/manager-api/ManagerClient"
 import {
@@ -31,6 +32,7 @@ type ManagerAkahuAccountRecord = {
     readonly customFields2?:
       | {
           readonly strings?: Record<string, unknown> | null | undefined
+          readonly dates?: Record<string, unknown> | null | undefined
         }
       | undefined
   }
@@ -38,12 +40,17 @@ type ManagerAkahuAccountRecord = {
 
 export const managerAkahuAccountFieldName = "Akahu Account"
 export const managerAkahuTransferRulesFieldName = "Akahu Transfer Rules"
+export const managerAkahuStartDateFieldName = "Akahu Start Date"
+export const managerBankOrCashAccountCustomFieldPlacementKey =
+  "1408c33b-6284-4f50-9e31-48cbea21f3cf"
 
 const managerBankOrCashAccountCustomFieldPlacement = [
-  "1408c33b-6284-4f50-9e31-48cbea21f3cf",
+  managerBankOrCashAccountCustomFieldPlacementKey,
 ] as const
 const managerMultilineTextCustomFieldType = 1
 const managerDropdownTextCustomFieldType = 2
+
+export type ManagerAkahuDateCustomFieldRecord = Pick<ItemOfDateCustomField, "key" | "item">
 
 type ManagerTextCustomFieldClient = Pick<
   Client,
@@ -120,6 +127,87 @@ const isManagerBankOrCashAccountTextFieldCurrent = (
   (desired.optionsForDropdownList === undefined ||
     field.optionsForDropdownList === desired.optionsForDropdownList)
 
+export type ManagerAkahuStartDateFieldSetupPlan =
+  | { readonly _tag: "reuse"; readonly field: ManagerAkahuDateCustomFieldRecord }
+  | { readonly _tag: "create"; readonly value: DateCustomField }
+  | {
+      readonly _tag: "repair"
+      readonly field: ManagerAkahuDateCustomFieldRecord
+      readonly value: DateCustomField
+    }
+
+const isReusableManagerAkahuStartDateField = (field: ManagerAkahuDateCustomFieldRecord) =>
+  field.item.name === managerAkahuStartDateFieldName &&
+  field.item.inactive !== true &&
+  (field.item.placement ?? []).includes(managerBankOrCashAccountCustomFieldPlacementKey)
+
+export const planManagerAkahuStartDateFieldSetup = (
+  fields: ReadonlyArray<ManagerAkahuDateCustomFieldRecord>,
+): ManagerAkahuStartDateFieldSetupPlan => {
+  const exactNameFields = fields.filter(
+    (field) => field.item.name === managerAkahuStartDateFieldName,
+  )
+  const reusableField = exactNameFields.find(isReusableManagerAkahuStartDateField)
+  if (reusableField) {
+    return { _tag: "reuse", field: reusableField }
+  }
+
+  const repairField = exactNameFields.toSorted((left, right) => {
+    const leftActive = left.item.inactive !== true
+    const rightActive = right.item.inactive !== true
+    if (leftActive !== rightActive) return leftActive ? -1 : 1
+
+    const leftPlacementCount = left.item.placement?.length ?? 0
+    const rightPlacementCount = right.item.placement?.length ?? 0
+    if (leftPlacementCount !== rightPlacementCount) return rightPlacementCount - leftPlacementCount
+
+    return left.key.localeCompare(right.key)
+  })[0]
+
+  if (!repairField) {
+    return {
+      _tag: "create",
+      value: makeManagerAkahuStartDateDateField(),
+    }
+  }
+
+  const placement = repairField.item.placement ?? []
+
+  return {
+    _tag: "repair",
+    field: repairField,
+    value: {
+      ...repairField.item,
+      inactive: false,
+      placement: placement.includes(managerBankOrCashAccountCustomFieldPlacementKey)
+        ? placement
+        : [...placement, managerBankOrCashAccountCustomFieldPlacementKey],
+    },
+  }
+}
+
+export const resolveManagerAkahuStartDateFieldSetupPlan = (
+  plan: ManagerAkahuStartDateFieldSetupPlan,
+  fields: ReadonlyArray<ManagerAkahuDateCustomFieldRecord>,
+): ManagerAkahuDateCustomFieldRecord | undefined => {
+  if (plan._tag === "reuse") return plan.field
+
+  if (plan._tag === "repair") {
+    const repairedField = fields.find((field) => field.key === plan.field.key)
+    if (repairedField) return repairedField
+  }
+
+  const refreshedPlan = planManagerAkahuStartDateFieldSetup(fields)
+  if (refreshedPlan._tag === "reuse") return refreshedPlan.field
+  return undefined
+}
+
+const makeManagerAkahuStartDateDateField = (): DateCustomField => ({
+  name: managerAkahuStartDateFieldName,
+  placement: [managerBankOrCashAccountCustomFieldPlacementKey],
+  excludeFromCopyingOrCloning: true,
+})
+
 export class ManagerFlows extends Context.Service<
   ManagerFlows,
   {
@@ -135,6 +223,12 @@ export class ManagerFlows extends Context.Service<
       const textFields = yield* Resource.manual(
         Effect.gen(function* () {
           return (yield* client["GET/api4/text-custom-field-batch"]()).items ?? []
+        }),
+      )
+
+      const dateFields = yield* Resource.manual(
+        Effect.gen(function* () {
+          return (yield* client["GET/api4/date-custom-field-batch"]()).items ?? []
         }),
       )
 
@@ -169,6 +263,47 @@ export class ManagerFlows extends Context.Service<
         return current.find((field) => field.item.name === name)!
       })
 
+      const ensureAkahuStartDateField = Effect.fn("ManagerFlows.ensureAkahuStartDateField")(
+        function* () {
+          const current = yield* Resource.get(dateFields)
+          const plan = planManagerAkahuStartDateFieldSetup(current)
+
+          const mutateRefreshAndResolve = Effect.fn(
+            "ManagerFlows.ensureAkahuStartDateField.mutateRefreshAndResolve",
+          )(function* (
+            plan: Extract<ManagerAkahuStartDateFieldSetupPlan, { _tag: "create" | "repair" }>,
+          ) {
+            if (plan._tag === "create") {
+              yield* client["POST/api4/date-custom-field"]({
+                value: plan.value,
+              })
+            } else {
+              yield* client["PUT/api4/date-custom-field"]({
+                key: plan.field.key,
+                value: plan.value,
+              })
+            }
+
+            yield* Resource.refresh(dateFields)
+            const refreshed = yield* Resource.get(dateFields)
+            const resolved = resolveManagerAkahuStartDateFieldSetupPlan(plan, refreshed)
+            if (!resolved) {
+              return yield* Effect.fail(
+                "Akahu Start Date field was not available after Manager custom-field setup",
+              )
+            }
+            return resolved
+          })
+
+          switch (plan._tag) {
+            case "reuse":
+              return plan.field
+            case "create":
+            case "repair":
+              return yield* mutateRefreshAndResolve(plan)
+          }
+        },
+      )
       const getAkahuSetupState = Effect.gen(function* () {
         const fields = yield* ensureCustomFields
         const business = yield* client["GET/api4/business-details"]()
@@ -219,12 +354,14 @@ export class ManagerFlows extends Context.Service<
           type: managerMultilineTextCustomFieldType,
           placement: managerBankOrCashAccountCustomFieldPlacement,
         })
+        const akahuStartDateField = yield* ensureAkahuStartDateField()
 
         const managerAccounts = (yield* client["GET/api4/bank-or-cash-account-batch"]()).items ?? []
         const selections = collectManagerAkahuAccountSelections({
           managerAccounts,
           accountFieldKey: accountField.key,
           transferRulesFieldKey: transferRulesField.key,
+          akahuStartDateFieldKey: akahuStartDateField.key,
           akahuAccounts: accounts,
         })
 
@@ -254,6 +391,7 @@ export const collectManagerAkahuAccountSelections = (options: {
   readonly managerAccounts: ReadonlyArray<ManagerAkahuAccountRecord>
   readonly accountFieldKey: string
   readonly transferRulesFieldKey: string
+  readonly akahuStartDateFieldKey: string
   readonly akahuAccounts: ReadonlyArray<Account>
 }) => {
   const linkedAccounts: Array<LinkedAccount> = []
@@ -283,6 +421,9 @@ export const collectManagerAkahuAccountSelections = (options: {
       currency: account.currency ?? null,
       canHavePendingTransactions: account.canHavePendingTransactions === true,
     } as const
+    const akahuStartDate = DateTime.make(
+      account.customFields2?.dates?.[options.akahuStartDateFieldKey] as string,
+    )
 
     if (akahuAccount) {
       const transferRulesResult = buildLinkedAccountTransferRules({
@@ -293,6 +434,7 @@ export const collectManagerAkahuAccountSelections = (options: {
       linkedAccounts.push(
         new LinkedAccount({
           ...accountMetadata,
+          akahuStartDate,
           akahuAccount,
           transferRules: transferRulesResult.rules,
           transferRuleWarnings: transferRulesResult.warnings,

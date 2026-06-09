@@ -44,6 +44,15 @@ We can use a Manager Custom Date field to do this.
 - `apps/server/src/Akahu.ts` currently sends settled Akahu transaction requests as cursor-only queries. A comment records that Akahu returns full app-accessible settled history when `start`/`end` are omitted.
 - `packages/manager-api/src/ManagerAkahuTransactionSync.ts` owns pure sync policies for duplicate detection, pending fingerprints, pending-to-settled matching, stale pending detection, and summary counts.
 - Current stale pending detection reports existing Akahu-created pending Manager entries absent from the current pending endpoint result set unless they were processed/replaced in the same run.
+- Effect `DateTime.make` accepts JavaScript-parsed date strings, so exact calendar-date validation needs both an input-shape guard and a `DateTime.formatIsoDate` round-trip check to reject rolled-over values such as `2024-02-30`.
+- Effect Schema branding works best here as a DateTime-backed string refinement followed by `Schema.brand`; `Schema.decodeTo` composes through the target encoded type and is not the right fit for adding the brand while validating the same string representation.
+- Task 2 found that existing server tests already asserted settled no-start requests remain cursor-only and pending requests remain `amount_as_number` plus cursor only; the task added coverage for settled start forwarding across cursor pages.
+- Task 3 found that focused manager-api Vitest runs resolve `@app/domain/*` through the workspace package export, so `@app/domain` must be built first when `packages/domain/dist` is absent.
+- Task 4 setup work found the generated Manager Date custom-field endpoints use the same item shape and bank/cash placement GUID as text custom fields, so setup can reuse placement value `1408c33b-6284-4f50-9e31-48cbea21f3cf` for `Akahu Start Date`.
+- Task 4 review follow-up found Manager date custom-field setup must not use a post-mutation exact-name lookup because duplicate `Akahu Start Date` fields can exist. Repair selection is now deterministic: reusable active bank/cash fields win first, otherwise active exact-name repair candidates with existing placements win before inactive or unplaced candidates, with key order as the final tiebreaker.
+- Task 4 malformed sync handling found `ManagerSyncFlows` evaluated foreign-currency importability before any start-date state check. Malformed `Akahu Start Date` handling now runs first so malformed accounts produce only the configuration error and no sync reads or writes.
+- Task 4 valid start-date enforcement found the current branch's `LinkedAccount` still stores `akahuStartDate` as `Option<DateTime.Utc>` only, so malformed Manager custom-field values are indistinguishable from unset values despite earlier malformed-state notes in this spec. Valid start-date enforcement was implemented against `Option.some` linked-account snapshots, and this discrepancy remains a follow-up issue for malformed-account behavior.
+- Task 4 valid start-date enforcement also found `ManagerSyncFlows` had been passing `start` through pending transaction request objects even though the pending RPC payload has no `start` field. Pending reads now stay cursor/current-state only; start-date filtering happens after rows are read.
 
 ## Decisions
 
@@ -173,7 +182,7 @@ We can use a Manager Custom Date field to do this.
 
 ## Implementation Plan
 
-### Task 1: Add Shared Calendar-Date And Start-Date Types
+### Task 1: Add Shared Calendar-Date And Start-Date Types (Completed)
 
 - Add or reuse one shared domain calendar-date schema/parser backed by Effect `DateTime` that validates exact `YYYY-MM-DD` dates and real calendar components.
 - Add a start-date state type in `packages/domain/src/Manager/AkahuCustomFields.ts` that can represent valid, unset, and malformed values without yet exposing it through `LinkedAccount` UI.
@@ -181,8 +190,9 @@ We can use a Manager Custom Date field to do this.
 - Add focused domain tests or typetests for valid dates, invalid calendar components, unset handling helpers, and malformed value preservation.
 - Keep this task non-user-visible so no account can configure a start date before sync enforcement exists.
 - Validation: `pnpm lint-fix`, `pnpm --filter @app/domain build`, and any focused domain runtime/type tests added in this task.
+- Completed in `packages/domain/src/shared.ts`, `packages/domain/src/Manager/AkahuCustomFields.ts`, and `packages/domain/tests/AkahuCustomFields.test.ts`.
 
-### Task 2: Add Settled Start Query Boundary
+### Task 2: Add Settled Start Query Boundary (Completed)
 
 - Extend the domain/RPC request shape for `AccountTransactions` with optional start date.
 - Update `packages/domain/src/Akahu.ts` settled transaction endpoint query schema with optional `start`.
@@ -191,8 +201,10 @@ We can use a Manager Custom Date field to do this.
 - Keep pending request query shape unchanged.
 - Add server/RPC tests for settled requests with no start, settled requests with start across cursor pages, and pending requests without start.
 - Validation: `pnpm lint-fix`, `pnpm test "apps/server/tests/Akahu.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter server build`.
+- Completed in `packages/domain/src/rpc.ts`, `packages/domain/src/Akahu.ts`, `apps/server/src/rpc.ts`, `apps/server/src/Akahu.ts`, and `apps/server/tests/Akahu.test.ts`.
+- Validation note: `pnpm lint-fix` is not defined in this workspace; `pnpm exec vp fmt` and `pnpm exec vp lint` were run instead, with `vp lint` passing after building internal package outputs.
 
-### Task 3: Add Pure Start-Date Policies
+### Task 3: Add Pure Start-Date Policies (Completed)
 
 - Add a pure eligibility helper in `packages/manager-api/src/ManagerAkahuTransactionSync.ts` for optional start-date comparison.
 - Use Effect `DateTime` parsing/formatting/comparison for eligibility decisions; do not use calendar-date string comparison as the decision mechanism.
@@ -200,23 +212,29 @@ We can use a Manager Custom Date field to do this.
 - Extend pending-to-settled matching to ignore pre-start existing pending candidates.
 - Add pure tests for inclusive equality, newer eligibility, older ineligibility, no-start pass-through, timezone-stable calendar handling, DateTime-backed malformed date rejection, and pre-start stale-pending filtering.
 - Validation: `pnpm lint-fix`, `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm --filter @app/domain build`, and `pnpm --filter @app/manager-api build`.
+- Completed in `packages/manager-api/src/ManagerAkahuTransactionSync.ts` and `packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts`.
+- Validation note: `pnpm lint-fix` is not defined in this workspace; `pnpm exec vp fmt` and `pnpm exec vp lint` were run instead. `pnpm --filter @app/domain build` was run before the focused manager-api Vitest command because the test imports domain package exports.
 
 ### Task 4: Add Custom Field Setup, Linked Metadata, UI, And Sync Enforcement
 
-- Extend `LinkedAccount` with the start-date state from Task 1 and update all source/test fixtures that construct `LinkedAccount`.
-- Add Manager Date custom-field lookup/update/creation to `apps/website/src/Manager/Flows.ts` using `GET/api4/date-custom-field-batch`, `POST/api4/date-custom-field`, and `PUT/api4/date-custom-field` for inactive or wrong-placement existing fields.
-- Update account selection collection to read `customFields2.dates` by the new field key.
+- Extend `LinkedAccount` with the start-date state from Task 1 and update all source/test fixtures that construct `LinkedAccount`. (Completed for setup/metadata scope.)
+- Add Manager Date custom-field lookup/update/creation to `apps/website/src/Manager/Flows.ts` using `GET/api4/date-custom-field-batch`, `POST/api4/date-custom-field`, and `PUT/api4/date-custom-field` for inactive or wrong-placement existing fields. (Completed for setup/metadata scope.)
+- Update account selection collection to read `customFields2.dates` by the new field key. (Completed for setup/metadata scope.)
 - Update setup/ready UI to show start-date state.
-- Update `ManagerSyncFlows` to pass valid linked-account start dates to settled transaction reads.
-- Return a per-account error with no Akahu reads or Manager writes when the linked account has a malformed start date.
-- Apply the pure eligibility helper before settled count/classification/duplicate/matching/write logic.
-- Apply the pure eligibility helper before pending count/fingerprint/duplicate/update/create logic.
-- Pass the optional start date into stale-pending detection.
-- Apply start-date filtering to unsupported foreign-currency account summary counting before `unsupportedSkipped` increments.
-- Add mocked sync-flow tests for settled on-date/newer imports, settled older rows ignored, five-overlap stop still winning when reached first, malformed date safe failure, pending on-date/newer processing, pending older rows ignored, and pre-start pending Manager entries ignored for stale warnings.
-- Add focused setup tests for field creation/reuse/update and valid/unset/malformed account date values.
-- Include fixture updates and focused coverage for `apps/website/tests/ManagerAkahuSyncController.test.ts` if `LinkedAccount` construction changes affect controller tests.
+- Update `ManagerSyncFlows` to pass valid linked-account start dates to settled transaction reads. (Completed for valid start-date enforcement scope.)
+- Return a per-account error with no Manager receipt/payment reads, Akahu reads, or Manager writes when the linked account has a malformed start date. (Completed for malformed-account scope.)
+- Apply the pure eligibility helper before settled count/classification/duplicate/matching/write logic. (Completed for valid start-date enforcement scope.)
+- Apply the pure eligibility helper before pending count/fingerprint/duplicate/update/create logic. (Completed for valid start-date enforcement scope.)
+- Pass the optional start date into stale-pending detection. (Completed for valid start-date enforcement scope.)
+- Apply start-date filtering to unsupported foreign-currency account summary counting before `unsupportedSkipped` increments. (Completed for valid start-date enforcement scope.)
+- Add mocked sync-flow tests for settled on-date/newer imports, settled older rows ignored, five-overlap stop still winning when reached first, malformed date safe failure, pending on-date/newer processing, pending older rows ignored, and pre-start pending Manager entries ignored for stale warnings. (Completed for malformed date safe-failure coverage and valid start-date enforcement coverage for settled on-date/newer imports, settled older rows ignored, pending on-date/newer processing, pending older rows ignored, and pre-start pending Manager entries ignored for stale warnings.)
+- Add focused setup tests for field creation/reuse/update and valid/unset/malformed account date values. (Completed for setup/metadata scope.)
+- Include fixture updates and focused coverage for `apps/website/tests/ManagerAkahuSyncController.test.ts` if `LinkedAccount` construction changes affect controller tests. (Completed for setup/metadata scope.)
 - Validation: `pnpm lint-fix`, `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, `pnpm test:website-sync-controller`, `pnpm --filter @app/domain build`, `pnpm --filter @app/manager-api build`, and `pnpm --filter website build`.
+- Validation note for setup/metadata scope: `pnpm lint-fix` is not defined in this workspace; `pnpm exec vp fmt` and `pnpm exec vp lint` were run instead. Also ran `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, `pnpm test:website-sync-controller`, `pnpm --filter @app/domain build`, `pnpm --filter @app/manager-api build`, and `pnpm --filter website build`.
+- Validation note for malformed-account sync scope: `pnpm exec vp fmt`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, `pnpm --filter @app/domain build`, `pnpm --filter @app/manager-api build`, `pnpm --filter website build`, and `pnpm exec vp lint` passed. The website build emitted Vite's existing large-chunk warning.
+- Validation note for valid start-date enforcement scope: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, `pnpm exec vp fmt`, `pnpm --filter @app/domain build`, `pnpm --filter @app/manager-api build`, `pnpm --filter website build`, and `pnpm exec vp lint` passed. The website build emitted Vite's existing large-chunk warning.
+- Remaining Task 4 work after these setup/metadata, malformed-account sync, and valid start-date enforcement changes: setup/ready UI display and any broader sync-flow regression coverage not yet added, such as five-overlap stop ordering.
 
 ### Task 5: Surface Start Date In Sync Confirmation
 

@@ -94,6 +94,28 @@ export type ManagerAkahuPendingFingerprintDecision =
     }
   | { readonly _tag: "unsupported"; readonly warning: string }
 
+export type ManagerAkahuTransactionStartDateEligibilityDecision =
+  | { readonly _tag: "eligible" }
+  | { readonly _tag: "ineligible" }
+
+export type ManagerAkahuManagerItemDateStartDateEligibilityDecision =
+  ManagerAkahuTransactionStartDateEligibilityDecision
+
+export interface ManagerAkahuTransactionStartDateEligibilityInput {
+  readonly transactionDate: DateTime.DateTime
+  readonly startDate?: DateTime.Utc | undefined
+}
+
+export interface ManagerAkahuDateTimeStartDateEligibilityInput {
+  readonly transactionDate: DateTime.DateTime
+  readonly startDate?: DateTime.Utc | undefined
+}
+
+export interface ManagerAkahuManagerItemDateStartDateEligibilityInput {
+  readonly itemDate: string | null | undefined
+  readonly startDate?: DateTime.Utc | undefined
+}
+
 export interface ManagerAkahuPendingFingerprintInput {
   readonly akahuAccountId: string
   readonly date: DateTime.DateTime
@@ -286,6 +308,7 @@ export interface ManagerAkahuPendingToSettledMatchInput {
   readonly settledSignedAmount: ManagerAkahuDecimalInput
   readonly settledDescription: string
   readonly excludedFdxTransactionIds: ReadonlySet<string>
+  readonly startDate?: DateTime.Utc | undefined
   readonly dateWindowDays?: number | undefined
 }
 
@@ -306,6 +329,7 @@ export interface ManagerAkahuStalePendingEntriesInput {
   >
   readonly currentPendingFdxTransactionIds: ReadonlySet<string>
   readonly processedFdxTransactionIds: ReadonlySet<string>
+  readonly startDate?: DateTime.Utc | undefined
 }
 
 export interface ManagerAkahuStalePendingTransferEntriesInput {
@@ -315,6 +339,7 @@ export interface ManagerAkahuStalePendingTransferEntriesInput {
   >
   readonly currentPendingFdxTransactionIds: ReadonlySet<string>
   readonly processedFdxTransactionIds: ReadonlySet<string>
+  readonly startDate?: DateTime.Utc | undefined
 }
 
 export const emptyManagerAkahuSyncSummaryCounts = (): ManagerAkahuSyncSummaryCounts => ({
@@ -418,6 +443,47 @@ const buildTransferRuleOverlapAggregationKey = (
     selectedRule: buildTransferRuleAggregationPart(selectedRule),
     ignoredRules: ignoredRules.map(buildTransferRuleAggregationPart),
   })
+
+export const decideManagerAkahuTransactionStartDateEligibility = (
+  input: ManagerAkahuTransactionStartDateEligibilityInput,
+): ManagerAkahuTransactionStartDateEligibilityDecision => {
+  if (input.startDate === undefined) {
+    return { _tag: "eligible" }
+  }
+
+  return DateTime.isGreaterThanOrEqualTo(input.transactionDate, input.startDate)
+    ? { _tag: "eligible" }
+    : { _tag: "ineligible" }
+}
+
+export const decideAkahuDateTimeStartDateEligibility = (
+  input: ManagerAkahuDateTimeStartDateEligibilityInput,
+): ManagerAkahuTransactionStartDateEligibilityDecision =>
+  decideManagerAkahuTransactionStartDateEligibility({
+    transactionDate: input.transactionDate,
+    startDate: input.startDate,
+  })
+
+export const decideManagerItemDateStartDateEligibility = (
+  input: ManagerAkahuManagerItemDateStartDateEligibilityInput,
+): ManagerAkahuManagerItemDateStartDateEligibilityDecision => {
+  if (input.startDate === undefined) {
+    return { _tag: "eligible" }
+  }
+
+  const transactionDate =
+    typeof input.itemDate === "string" ? DateTime.makeZoned(input.itemDate) : Option.none()
+  if (Option.isNone(transactionDate)) {
+    return {
+      _tag: "ineligible",
+    }
+  }
+
+  return decideManagerAkahuTransactionStartDateEligibility({
+    transactionDate: transactionDate.value,
+    startDate: input.startDate,
+  })
+}
 
 export const buildAkahuPendingTransactionFingerprint = (
   input: ManagerAkahuPendingFingerprintInput,
@@ -803,7 +869,6 @@ export const decidePendingTransferToSettledMatch = (
 ): ManagerAkahuPendingTransferToSettledMatchDecision => {
   const payload = input.payload.value
   const settledDay = DateTime.makeUnsafe(payload.date)
-  const settledDayNumber = dateTimeDayNumber(settledDay)
   const dateWindowDays = input.dateWindowDays ?? 3
   const settledDescription = normalizeAkahuTransferRuleText(payload.description)
   const candidates: Array<{
@@ -843,7 +908,7 @@ export const decidePendingTransferToSettledMatch = (
     const transferDate = typeof item.date === "string" ? DateTime.makeUnsafe(item.date) : undefined
     if (
       transferDate === undefined ||
-      Math.abs(dateTimeDayNumber(transferDate) - settledDayNumber) > dateWindowDays
+      !isCalendarDateWithinInclusiveWindow(transferDate, settledDay, dateWindowDays)
     ) {
       continue
     }
@@ -891,6 +956,7 @@ export const decideStalePendingEntries = (
   input.syncRead.existingReceiptPaymentFdxTransactionIdEntries.filter(
     (entry) =>
       isAkahuPendingFdxTransactionId(entry.fdxTransactionId) &&
+      !isEntryKnownBeforeManagerAkahuStartDate(entry, input.startDate) &&
       !input.currentPendingFdxTransactionIds.has(entry.fdxTransactionId) &&
       !input.processedFdxTransactionIds.has(entry.fdxTransactionId),
   )
@@ -901,13 +967,36 @@ export const decideStalePendingTransferEntries = (
   input.syncRead.existingTransferFdxTransactionIdEntries.filter(
     (entry) =>
       isAkahuTransferPendingFdxTransactionId(entry.fdxTransactionId) &&
+      !isEntryKnownBeforeManagerAkahuStartDate(entry, input.startDate) &&
       !input.currentPendingFdxTransactionIds.has(entry.fdxTransactionId) &&
       !input.processedFdxTransactionIds.has(entry.fdxTransactionId),
   )
 
+const isEntryKnownBeforeManagerAkahuStartDate = (
+  entry: ManagerExistingFdxTransactionIdEntry,
+  startDate: DateTime.Utc | undefined,
+): boolean => {
+  const decision = decideManagerItemDateStartDateEligibility({
+    itemDate: getEntryDate(entry),
+    startDate,
+  })
+  return decision._tag === "ineligible"
+}
+
 const getEntryKind = (
   entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry,
 ): ManagerAkahuTransactionKind => entry._tag
+
+const getEntryDate = (entry: ManagerExistingFdxTransactionIdEntry) => {
+  switch (entry._tag) {
+    case "receipt":
+      return entry.receipt.item.date
+    case "payment":
+      return entry.payment.item.date
+    case "interAccountTransfer":
+      return entry.interAccountTransfer.item.date
+  }
+}
 
 const getEntryItem = (entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry) =>
   entry._tag === "receipt" ? entry.receipt.item : entry.payment.item
@@ -952,7 +1041,6 @@ export const decidePendingToSettledMatch = (
     return { _tag: "unsupported", warning: "Zero settled amounts cannot match pending entries." }
   }
 
-  const settledDay = dateTimeDayNumber(input.settledDate)
   const dateWindowDays = input.dateWindowDays ?? 3
   const settledDescription = normalizeAkahuTransactionDescription(input.settledDescription)
   const settledAbsoluteAmount = getAbsoluteManagerAkahuAmount(settledAmount.amount)
@@ -966,6 +1054,9 @@ export const decidePendingToSettledMatch = (
       continue
     }
     if (getEntryBankOrCashAccountKey(entry) !== input.syncRead.bankOrCashAccountKey) {
+      continue
+    }
+    if (isEntryKnownBeforeManagerAkahuStartDate(entry, input.startDate)) {
       continue
     }
     if (getEntryKind(entry) !== settledKind) {
@@ -990,10 +1081,18 @@ export const decidePendingToSettledMatch = (
     }
 
     const entryDate = getEntryItem(entry).date
-    const entryDateTime = typeof entryDate === "string" ? DateTime.makeUnsafe(entryDate) : undefined
+    const entryCalendarDate =
+      typeof entryDate === "string" ? DateTime.make(entryDate) : Option.none()
+    if (Option.isNone(entryCalendarDate)) {
+      continue
+    }
+
     if (
-      entryDateTime === undefined ||
-      Math.abs(dateTimeDayNumber(entryDateTime) - settledDay) > dateWindowDays
+      !isCalendarDateWithinInclusiveWindow(
+        entryCalendarDate.value,
+        input.settledDate,
+        dateWindowDays,
+      )
     ) {
       continue
     }
@@ -1015,6 +1114,15 @@ export const decidePendingToSettledMatch = (
   return { _tag: "none" }
 }
 
-const dateTimeDayNumber = (date: DateTime.DateTime): number => {
-  return DateTime.toEpochMillis(date) / 86_400_000
+const isCalendarDateWithinInclusiveWindow = (
+  candidate: DateTime.DateTime,
+  center: DateTime.DateTime,
+  windowDays: number,
+): boolean => {
+  const minimum = DateTime.subtract(center, { days: windowDays })
+  const maximum = DateTime.add(center, { days: windowDays })
+  return (
+    DateTime.isGreaterThanOrEqualTo(candidate, minimum) &&
+    DateTime.isLessThanOrEqualTo(candidate, maximum)
+  )
 }

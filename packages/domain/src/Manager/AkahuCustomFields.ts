@@ -225,6 +225,7 @@ export class LinkedAccount extends Schema.Class<LinkedAccount>("LinkedAccount")(
   name: Schema.String,
   currency: Schema.NullOr(Schema.String),
   canHavePendingTransactions: Schema.Boolean,
+  akahuStartDate: Schema.OptionFromNullOr(Schema.DateTimeUtc),
   akahuAccount: Account,
   transferRules: Schema.Array(LinkedAccountTransferRule),
   transferRuleWarnings: Schema.Array(Schema.String),

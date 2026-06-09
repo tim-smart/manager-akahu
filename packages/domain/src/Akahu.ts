@@ -97,6 +97,7 @@ export const AkahuApi = HttpApi.make("akahu").add(
       },
       query: {
         cursor: Schema.optional(Schema.String),
+        start: Schema.optional(Schema.DateTimeUtc),
       },
       success: PaginatedResponse(Transaction),
     }),
