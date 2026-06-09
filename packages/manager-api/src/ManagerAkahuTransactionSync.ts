@@ -9,6 +9,7 @@ import {
 import type {
   ManagerBankOrCashAccountSyncRead,
   ManagerExistingFdxTransactionIdEntry,
+  ManagerExistingReceiptPaymentFdxTransactionIdEntry,
 } from "./ManagerBatchPagination.ts"
 
 export const managerAkahuPendingFingerprintPrefix = "akahu-pending:v1:" as const
@@ -97,17 +98,20 @@ export type ManagerAkahuPendingExactFingerprintDecision =
   | {
       readonly _tag: "update"
       readonly fingerprint: string
-      readonly entry: ManagerExistingFdxTransactionIdEntry
+      readonly entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry
     }
   | {
       readonly _tag: "ambiguous"
       readonly fingerprint: string
-      readonly entries: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
+      readonly entries: ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
       readonly warning: string
     }
 
 export interface ManagerAkahuPendingToSettledMatchInput {
-  readonly syncRead: ManagerBankOrCashAccountSyncRead
+  readonly syncRead: Pick<
+    ManagerBankOrCashAccountSyncRead,
+    "bankOrCashAccountKey" | "existingReceiptPaymentFdxTransactionIdEntries"
+  >
   readonly settledDate: DateTime.DateTime
   readonly settledSignedAmount: ManagerAkahuDecimalInput
   readonly settledDescription: string
@@ -116,17 +120,20 @@ export interface ManagerAkahuPendingToSettledMatchInput {
 }
 
 export type ManagerAkahuPendingToSettledMatchDecision =
-  | { readonly _tag: "match"; readonly entry: ManagerExistingFdxTransactionIdEntry }
+  | { readonly _tag: "match"; readonly entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry }
   | { readonly _tag: "none" }
   | {
       readonly _tag: "ambiguous"
-      readonly candidates: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
+      readonly candidates: ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
       readonly warning: string
     }
   | { readonly _tag: "unsupported"; readonly warning: string }
 
 export interface ManagerAkahuStalePendingEntriesInput {
-  readonly syncRead: ManagerBankOrCashAccountSyncRead
+  readonly syncRead: Pick<
+    ManagerBankOrCashAccountSyncRead,
+    "existingReceiptPaymentFdxTransactionIdEntries"
+  >
   readonly currentPendingFdxTransactionIds: ReadonlySet<string>
   readonly processedFdxTransactionIds: ReadonlySet<string>
 }
@@ -288,10 +295,10 @@ export const decideSettledDuplicateByAkahuTransactionId = (
 }
 
 export const decidePendingExactFingerprint = (
-  syncRead: ManagerBankOrCashAccountSyncRead,
+  syncRead: Pick<ManagerBankOrCashAccountSyncRead, "existingReceiptPaymentFdxTransactionIdIndex">,
   fingerprint: string,
 ): ManagerAkahuPendingExactFingerprintDecision => {
-  const entries = syncRead.existingFdxTransactionIdIndex.get(fingerprint) ?? []
+  const entries = syncRead.existingReceiptPaymentFdxTransactionIdIndex.get(fingerprint) ?? []
   if (entries.length === 0) {
     return { _tag: "create", fingerprint }
   }
@@ -309,8 +316,8 @@ export const decidePendingExactFingerprint = (
 
 export const decideStalePendingEntries = (
   input: ManagerAkahuStalePendingEntriesInput,
-): ReadonlyArray<ManagerExistingFdxTransactionIdEntry> =>
-  input.syncRead.existingFdxTransactionIdEntries.filter(
+): ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry> =>
+  input.syncRead.existingReceiptPaymentFdxTransactionIdEntries.filter(
     (entry) =>
       isAkahuPendingFdxTransactionId(entry.fdxTransactionId) &&
       !input.currentPendingFdxTransactionIds.has(entry.fdxTransactionId) &&
@@ -318,26 +325,22 @@ export const decideStalePendingEntries = (
   )
 
 const getEntryKind = (
-  entry: ManagerExistingFdxTransactionIdEntry,
-): ManagerAkahuTransactionKind | "interAccountTransfer" => entry._tag
+  entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry,
+): ManagerAkahuTransactionKind => entry._tag
 
-const getEntryItem = (
-  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
-) => (entry._tag === "receipt" ? entry.receipt.item : entry.payment.item)
+const getEntryItem = (entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry) =>
+  entry._tag === "receipt" ? entry.receipt.item : entry.payment.item
 
-const getEntryLineAmount = (
-  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
-): unknown => getEntryItem(entry).lines?.[0]?.amount
+const getEntryLineAmount = (entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry): unknown =>
+  getEntryItem(entry).lines?.[0]?.amount
 
-const getEntryDescription = (
-  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
-): string => {
+const getEntryDescription = (entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry): string => {
   const item = getEntryItem(entry)
   return item.description ?? item.lines?.[0]?.lineDescription ?? ""
 }
 
 const getEntryBankOrCashAccountKey = (
-  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
+  entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry,
 ): string | null | undefined =>
   entry._tag === "receipt" ? entry.receipt.item.receivedIn : entry.payment.item.paidFrom
 
@@ -366,16 +369,13 @@ export const decidePendingToSettledMatch = (
   const dateWindowDays = input.dateWindowDays ?? 3
   const settledDescription = normalizeAkahuTransactionDescription(input.settledDescription)
   const settledAbsoluteAmount = getAbsoluteManagerAkahuAmount(settledAmount.amount)
-  const candidates: Array<ManagerExistingFdxTransactionIdEntry> = []
+  const candidates: Array<ManagerExistingReceiptPaymentFdxTransactionIdEntry> = []
 
-  for (const entry of input.syncRead.existingFdxTransactionIdEntries) {
+  for (const entry of input.syncRead.existingReceiptPaymentFdxTransactionIdEntries) {
     if (input.excludedFdxTransactionIds.has(entry.fdxTransactionId)) {
       continue
     }
     if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
-      continue
-    }
-    if (entry._tag === "interAccountTransfer") {
       continue
     }
     if (getEntryBankOrCashAccountKey(entry) !== input.syncRead.bankOrCashAccountKey) {

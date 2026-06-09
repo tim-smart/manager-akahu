@@ -405,6 +405,34 @@ it.effect(
         "akahu-tx-existing",
         "transfer-debit",
       ])
+      expect(
+        syncRead.existingReceiptPaymentFdxTransactionIdEntries.map(
+          (entry) => entry.fdxTransactionId,
+        ),
+      ).toEqual([
+        "receipt-first-page",
+        "akahu-tx-existing",
+        "receipt-last",
+        "payment-first-page",
+        "payment-2",
+        "akahu-tx-existing",
+        "payment-last",
+      ])
+      expect(
+        syncRead.existingTransferFdxTransactionIdEntries.map((entry) => entry.fdxTransactionId),
+      ).toEqual(["akahu-tx-existing", "transfer-debit"])
+      expect(
+        syncRead.existingReceiptPaymentFdxTransactionIdIndex.get("akahu-tx-existing"),
+      ).toHaveLength(2)
+      expect(syncRead.existingTransferFdxTransactionIdIndex.get("akahu-tx-existing")).toEqual([
+        {
+          _tag: "interAccountTransfer",
+          fdxTransactionId: "akahu-tx-existing",
+          key: "inter-account-transfer-1",
+          transferSide: "credit",
+          interAccountTransfer,
+        },
+      ])
       expect(syncRead.existingFdxTransactionIdIndex.get("akahu-tx-existing")).toEqual([
         {
           _tag: "receipt",

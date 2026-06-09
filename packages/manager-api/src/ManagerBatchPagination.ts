@@ -52,11 +52,31 @@ export type ManagerExistingFdxTransactionIdEntry =
       readonly interAccountTransfer: ItemOfInterAccountTransfer
     }
 
+export type ManagerExistingReceiptPaymentFdxTransactionIdEntry = Extract<
+  ManagerExistingFdxTransactionIdEntry,
+  { readonly _tag: "receipt" | "payment" }
+>
+
+export type ManagerExistingTransferFdxTransactionIdEntry = Extract<
+  ManagerExistingFdxTransactionIdEntry,
+  { readonly _tag: "interAccountTransfer" }
+>
+
 export interface ManagerBankOrCashAccountSyncRead {
   readonly bankOrCashAccountKey: string
   readonly receipts: ReadonlyArray<ItemOfReceipt>
   readonly payments: ReadonlyArray<ItemOfPayment>
   readonly interAccountTransfers: ReadonlyArray<ItemOfInterAccountTransfer>
+  readonly existingReceiptPaymentFdxTransactionIdEntries: ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
+  readonly existingReceiptPaymentFdxTransactionIdIndex: ReadonlyMap<
+    string,
+    ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
+  >
+  readonly existingTransferFdxTransactionIdEntries: ReadonlyArray<ManagerExistingTransferFdxTransactionIdEntry>
+  readonly existingTransferFdxTransactionIdIndex: ReadonlyMap<
+    string,
+    ReadonlyArray<ManagerExistingTransferFdxTransactionIdEntry>
+  >
   readonly existingFdxTransactionIdEntries: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
   readonly existingFdxTransactionIdIndex: ReadonlyMap<
     string,
@@ -121,9 +141,9 @@ const fetchAllManagerBatchItems = <Params, Page, Item, Error, Requirements>(opti
     }
   })
 
-const appendExistingFdxTransactionIdEntry = (
-  index: Map<string, Array<ManagerExistingFdxTransactionIdEntry>>,
-  entry: ManagerExistingFdxTransactionIdEntry,
+const appendExistingFdxTransactionIdEntry = <Entry extends ManagerExistingFdxTransactionIdEntry>(
+  index: Map<string, Array<Entry>>,
+  entry: Entry,
 ) => {
   const entries = index.get(entry.fdxTransactionId)
   if (entries === undefined) {
@@ -141,7 +161,17 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
   readonly interAccountTransfers?: ReadonlyArray<ItemOfInterAccountTransfer>
 }): ManagerBankOrCashAccountSyncRead => {
   const entries: Array<ManagerExistingFdxTransactionIdEntry> = []
+  const receiptPaymentEntries: Array<ManagerExistingReceiptPaymentFdxTransactionIdEntry> = []
+  const transferEntries: Array<ManagerExistingTransferFdxTransactionIdEntry> = []
   const mutableIndex = new Map<string, Array<ManagerExistingFdxTransactionIdEntry>>()
+  const mutableReceiptPaymentIndex = new Map<
+    string,
+    Array<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
+  >()
+  const mutableTransferIndex = new Map<
+    string,
+    Array<ManagerExistingTransferFdxTransactionIdEntry>
+  >()
   const interAccountTransfers = input.interAccountTransfers ?? []
 
   for (const receipt of input.receipts) {
@@ -150,14 +180,16 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
       continue
     }
 
-    const entry: ManagerExistingFdxTransactionIdEntry = {
+    const entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry = {
       _tag: "receipt",
       fdxTransactionId,
       key: receipt.key,
       receipt,
     }
     entries.push(entry)
+    receiptPaymentEntries.push(entry)
     appendExistingFdxTransactionIdEntry(mutableIndex, entry)
+    appendExistingFdxTransactionIdEntry(mutableReceiptPaymentIndex, entry)
   }
 
   for (const payment of input.payments) {
@@ -166,14 +198,16 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
       continue
     }
 
-    const entry: ManagerExistingFdxTransactionIdEntry = {
+    const entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry = {
       _tag: "payment",
       fdxTransactionId,
       key: payment.key,
       payment,
     }
     entries.push(entry)
+    receiptPaymentEntries.push(entry)
     appendExistingFdxTransactionIdEntry(mutableIndex, entry)
+    appendExistingFdxTransactionIdEntry(mutableReceiptPaymentIndex, entry)
   }
 
   for (const interAccountTransfer of interAccountTransfers) {
@@ -183,7 +217,7 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
       fdxCreditTransactionId !== null &&
       fdxCreditTransactionId !== ""
     ) {
-      const entry: ManagerExistingFdxTransactionIdEntry = {
+      const entry: ManagerExistingTransferFdxTransactionIdEntry = {
         _tag: "interAccountTransfer",
         fdxTransactionId: fdxCreditTransactionId,
         key: interAccountTransfer.key,
@@ -191,7 +225,9 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
         interAccountTransfer,
       }
       entries.push(entry)
+      transferEntries.push(entry)
       appendExistingFdxTransactionIdEntry(mutableIndex, entry)
+      appendExistingFdxTransactionIdEntry(mutableTransferIndex, entry)
     }
 
     const fdxDebitTransactionId = interAccountTransfer.item.fdxDebitTransactionId
@@ -200,7 +236,7 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
       fdxDebitTransactionId !== null &&
       fdxDebitTransactionId !== ""
     ) {
-      const entry: ManagerExistingFdxTransactionIdEntry = {
+      const entry: ManagerExistingTransferFdxTransactionIdEntry = {
         _tag: "interAccountTransfer",
         fdxTransactionId: fdxDebitTransactionId,
         key: interAccountTransfer.key,
@@ -208,7 +244,9 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
         interAccountTransfer,
       }
       entries.push(entry)
+      transferEntries.push(entry)
       appendExistingFdxTransactionIdEntry(mutableIndex, entry)
+      appendExistingFdxTransactionIdEntry(mutableTransferIndex, entry)
     }
   }
 
@@ -217,6 +255,10 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
     receipts: input.receipts,
     payments: input.payments,
     interAccountTransfers,
+    existingReceiptPaymentFdxTransactionIdEntries: receiptPaymentEntries,
+    existingReceiptPaymentFdxTransactionIdIndex: new Map(mutableReceiptPaymentIndex),
+    existingTransferFdxTransactionIdEntries: transferEntries,
+    existingTransferFdxTransactionIdIndex: new Map(mutableTransferIndex),
     existingFdxTransactionIdEntries: entries,
     existingFdxTransactionIdIndex: new Map(mutableIndex),
   }
