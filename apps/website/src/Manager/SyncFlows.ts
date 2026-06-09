@@ -375,10 +375,10 @@ const refreshManagerAkahuTransferRuleAccounts = Effect.fn(
     "GET/api4/text-custom-field-batch"
   ]()).items?.find((field) => field.item.name === managerAkahuTransferRulesFieldName)
   if (!transferRulesField) {
-    return input.accounts.map(
-      (account): ManagerAkahuRefreshedLinkedAccount => ({
+    return input.accounts.map((account) =>
+      buildManagerAkahuRefreshedAccountWithoutTransferRules({
         account,
-        invalidTransferRuleMatchers: [],
+        warning: `Manager custom field "${managerAkahuTransferRulesFieldName}" is missing; transfer rules were disabled for this sync.`,
       }),
     )
   }
@@ -396,7 +396,10 @@ const refreshManagerAkahuTransferRuleAccounts = Effect.fn(
     const managerAccount = managerAccountItemsByKey.get(account.key)
     const sourceAccount = managerAccountsByKey.get(account.key)
     if (!managerAccount || !sourceAccount) {
-      return { account, invalidTransferRuleMatchers: [] }
+      return buildManagerAkahuRefreshedAccountWithoutTransferRules({
+        account,
+        warning: `Manager bank/cash account ${account.name} (${account.key}) was not returned by Manager during sync-start refresh; transfer rules were disabled for this sync.`,
+      })
     }
 
     const rawValue = managerAccount.item.customFields2?.strings?.[transferRulesField.key]
@@ -420,6 +423,22 @@ const refreshManagerAkahuTransferRuleAccounts = Effect.fn(
       }),
     }
   })
+})
+
+const buildManagerAkahuRefreshedAccountWithoutTransferRules = (input: {
+  readonly account: LinkedAccount
+  readonly warning: string
+}): ManagerAkahuRefreshedLinkedAccount => ({
+  account: new LinkedAccount({
+    key: input.account.key,
+    name: input.account.name,
+    currency: input.account.currency,
+    canHavePendingTransactions: input.account.canHavePendingTransactions,
+    akahuAccount: input.account.akahuAccount,
+    transferRules: [],
+    transferRuleWarnings: [input.warning],
+  }),
+  invalidTransferRuleMatchers: [],
 })
 
 const managerAkahuAccountMetadata = (

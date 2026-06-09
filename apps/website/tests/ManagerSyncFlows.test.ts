@@ -6,7 +6,11 @@ import {
   Transaction,
   UserId,
 } from "@app/domain/Akahu"
-import { AkahuTokens, LinkedAccount } from "@app/domain/Manager/AkahuCustomFields"
+import {
+  AkahuTokens,
+  LinkedAccount,
+  LinkedAccountTransferRule,
+} from "@app/domain/Manager/AkahuCustomFields"
 import { ManagerBankAccountClearStatusValue } from "@app/manager-api/ManagerCompatibility"
 import type {
   ItemOfBankOrCashAccount,
@@ -50,6 +54,25 @@ const linkedAccount = new LinkedAccount({
   canHavePendingTransactions: true,
   akahuAccount,
   transferRules: [],
+  transferRuleWarnings: [],
+})
+
+const linkedAccountWithSetupTimeTransferRule = new LinkedAccount({
+  ...linkedAccount,
+  transferRules: [
+    new LinkedAccountTransferRule({
+      sourceAccountKey: bankOrCashAccountKey,
+      sourceAccountName: "Manager Checking",
+      sourceAccountCurrency: null,
+      sourceAccountCanHavePendingTransactions: true,
+      keyword: "Transfer to savings",
+      normalizedKeyword: "transfer to savings",
+      destinationAccountKey: destinationBankOrCashAccountKey,
+      destinationAccountName: "Manager Savings",
+      destinationAccountCurrency: null,
+      destinationAccountCanHavePendingTransactions: true,
+    }),
+  ],
   transferRuleWarnings: [],
 })
 
@@ -163,6 +186,7 @@ const makeMockClient = (options?: {
   readonly payments?: ReadonlyArray<ItemOfPayment>
   readonly interAccountTransfers?: ReadonlyArray<ItemOfInterAccountTransfer>
   readonly managerAccounts?: ReadonlyArray<ItemOfBankOrCashAccount>
+  readonly transferRulesFieldExists?: boolean
 }) => {
   const receiptBatchRequests: Array<unknown> = []
   const paymentBatchRequests: Array<unknown> = []
@@ -177,20 +201,23 @@ const makeMockClient = (options?: {
   const receipts = options?.receipts ?? [existingZeroPendingReceipt]
   const payments = options?.payments ?? []
   const interAccountTransfers = options?.interAccountTransfers ?? []
+  const transferRulesFieldExists = options?.transferRulesFieldExists ?? true
 
   const client: ManagerAkahuTransactionSyncManagerClient = {
     "GET/api4/text-custom-field-batch": () =>
       Effect.succeed({
         _links: null,
         _actions: null,
-        items: [
-          {
-            key: transferRulesFieldKey,
-            item: { name: "Akahu Transfer Rules" },
-            _links: null,
-            _actions: null,
-          },
-        ],
+        items: transferRulesFieldExists
+          ? [
+              {
+                key: transferRulesFieldKey,
+                item: { name: "Akahu Transfer Rules" },
+                _links: null,
+                _actions: null,
+              },
+            ]
+          : [],
       }),
     "GET/api4/bank-or-cash-account-batch": () =>
       Effect.succeed({
@@ -302,7 +329,15 @@ it.effect("skips unsupported foreign-currency accounts with one account warning"
       receiptBatchRequests,
       receiptPayloads,
       receiptPutPayloads,
-    } = makeMockClient()
+    } = makeMockClient({
+      managerAccounts: [
+        makeManagerBankOrCashAccount({
+          key: "manager-usd-checking",
+          name: "Manager USD Checking",
+          currency: "USD",
+        }),
+      ],
+    })
 
     const summary = yield* syncManagerAkahuTransactions({
       accounts: [unsupportedForeignCurrencyLinkedAccount],
@@ -382,6 +417,83 @@ it.effect("creates settled inter-account transfers for matching fresh transfer r
       errors: 0,
     })
   }),
+)
+
+it.effect("does not reuse setup-time transfer rules when the Manager field was deleted", () =>
+  Effect.gen(function* () {
+    const { client, interAccountTransferPayloads, paymentPayloads } = makeMockClient({
+      receipts: [],
+      transferRulesFieldExists: false,
+    })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccountWithSetupTimeTransferRule],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction("settled-field-deleted", "-25.01", "Transfer to savings"),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(paymentPayloads).toHaveLength(1)
+    expect(summary.accounts[0]?.account.transferRules).toEqual([])
+    expect(summary.accounts[0]?.warnings).toEqual([
+      'Manager custom field "Akahu Transfer Rules" is missing; transfer rules were disabled for this sync.',
+    ])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      transferRulesMatched: 0,
+      transfersCreated: 0,
+      paymentsCreated: 1,
+      warnings: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect(
+  "does not reuse setup-time transfer rules when the selected Manager account is absent",
+  () =>
+    Effect.gen(function* () {
+      const { client, interAccountTransferPayloads, paymentPayloads } = makeMockClient({
+        receipts: [],
+        managerAccounts: [
+          makeManagerBankOrCashAccount({
+            key: destinationBankOrCashAccountKey,
+            name: "Manager Savings",
+          }),
+        ],
+      })
+
+      const summary = yield* syncManagerAkahuTransactions({
+        accounts: [linkedAccountWithSetupTimeTransferRule],
+        client,
+        tokens,
+        fetchSettledTransactions: () =>
+          Stream.fromIterable([
+            makeSettledTransaction("settled-account-absent", "-25.01", "Transfer to savings"),
+          ]),
+        fetchPendingTransactions: () => Stream.empty,
+      })
+
+      expect(interAccountTransferPayloads).toEqual([])
+      expect(paymentPayloads).toHaveLength(1)
+      expect(summary.accounts[0]?.account.transferRules).toEqual([])
+      expect(summary.accounts[0]?.warnings).toEqual([
+        "Manager bank/cash account Manager Checking (manager-checking) was not returned by Manager during sync-start refresh; transfer rules were disabled for this sync.",
+      ])
+      expect(summary.overall).toMatchObject({
+        settledFetched: 1,
+        transferRulesMatched: 0,
+        transfersCreated: 0,
+        paymentsCreated: 1,
+        warnings: 1,
+        errors: 0,
+      })
+    }),
 )
 
 it.effect("skips settled transfers already imported as Manager transfers", () =>

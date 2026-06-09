@@ -376,12 +376,13 @@ Status: Completed.
 
 ### Task 6 Review: Settled Transfer Sync Code Quality Follow-Up
 
-Status: Pending.
+Status: Partially Completed.
 
-- Do not preserve cached setup-time transfer rules when sync-start refresh cannot prove current Manager state. `refreshManagerAkahuTransferRuleAccounts` currently falls back to the original `LinkedAccount` when the `Akahu Transfer Rules` field is missing or the selected Manager account is absent from the refreshed account batch, which undermines the Task 6 freshness boundary and can import using stale rules. Make the refresh outcome explicit: either report/skip the affected account, or rebuild with empty current rules plus a warning, but never silently carry cached rules forward. Add focused tests for field deletion after setup and selected account absence from the refreshed batch.
+- Completed: Do not preserve cached setup-time transfer rules when sync-start refresh cannot prove current Manager state. `refreshManagerAkahuTransferRuleAccounts` now rebuilds affected linked accounts with empty current transfer rules, no invalid transfer-rule matchers, and a non-blocking warning when the `Akahu Transfer Rules` field is missing or the selected Manager account is absent from the refreshed account batch. Focused `ManagerSyncFlows` tests cover field deletion after setup and selected account absence from the refreshed batch.
+- Discovery: the existing foreign-currency sync-flow test was relying on the old fallback by omitting the selected USD Manager account from the refreshed account batch. Its mock now includes the selected USD account so the test remains scoped to currency skip behavior.
 - Move invalid transfer-intent matching back into the canonical domain transfer-rule boundary. `SyncFlows.ts` now calls `buildLinkedAccountTransferRules` and then separately reparses the same raw value in `buildInvalidTransferRuleMatchers`, duplicating self-target and unknown-destination validation logic in website orchestration. Prefer extending the domain helper to return one structured ruleset result, such as valid rules, warnings, and invalid intent matchers/skipped rules with reasons, so setup and sync consume the same validation model without bespoke parser imports in sync code.
 - Collapse settled transaction orchestration before wiring Task 7/8 transfer merge and pending behavior. `processManagerAkahuSettledTransaction` now contains two parallel import pipelines for transfer and receipt/payment flows, with duplicated same-run duplicate checks, warning/count mutation, duplicate-overlap result construction, and create/write handling. Introduce a small settled import-intent decision boundary (`invalid-transfer-intent`, `transfer`, or `suspense`) plus shared account-state helpers for warning skips, duplicate-overlap skips, and successful writes, so mirror merge and pending transfer work does not add more nested special cases to the settled stream loop.
-- Validation: not rerun for this review-only specification update; the reviewed task already records `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passing.
+- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
 ### Task 7: Wire Settled Mirror Merge And Pending Replacement
 
