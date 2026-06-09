@@ -100,6 +100,13 @@ export const matchesAkahuTransferRuleDescription = (
   description: string,
 ): boolean => normalizeAkahuTransferRuleText(description).includes(rule.normalizedKeyword)
 
+export type ManagerAkahuTransferRuleAccountMetadata = {
+  readonly key: string
+  readonly name: string
+  readonly currency: string | null
+  readonly canHavePendingTransactions: boolean
+}
+
 export class LinkedAccountTransferRule extends Schema.Class<LinkedAccountTransferRule>(
   "LinkedAccountTransferRule",
 )({
@@ -114,6 +121,76 @@ export class LinkedAccountTransferRule extends Schema.Class<LinkedAccountTransfe
   destinationAccountCurrency: Schema.NullOr(Schema.String),
   destinationAccountCanHavePendingTransactions: Schema.Boolean,
 }) {}
+
+export const buildLinkedAccountTransferRules = (options: {
+  readonly sourceAccount: ManagerAkahuTransferRuleAccountMetadata
+  readonly rawValue: unknown
+  readonly managerAccountsByKey: ReadonlyMap<string, ManagerAkahuTransferRuleAccountMetadata>
+}) => {
+  if (typeof options.rawValue !== "string" || options.rawValue.trim() === "") {
+    return { rules: [], warnings: [] } as const
+  }
+
+  const parsed = parseAkahuTransferRules(options.rawValue)
+  const rules: Array<LinkedAccountTransferRule> = []
+  const warnings = parsed.invalidLines.map((line) =>
+    formatTransferRuleSyntaxWarning(line.reason, line.lineNumber),
+  )
+  const seenRuleKeys = new Set<string>()
+
+  for (const rule of parsed.rules) {
+    const ruleKey = `${rule.normalizedKeyword}\u0000${rule.destinationAccountKey}`
+    if (seenRuleKeys.has(ruleKey)) {
+      continue
+    }
+    seenRuleKeys.add(ruleKey)
+
+    if (rule.destinationAccountKey === options.sourceAccount.key) {
+      warnings.push(
+        `Transfer rule "${rule.keyword}" targets its own Manager bank/cash account and was skipped.`,
+      )
+      continue
+    }
+
+    const destinationAccount = options.managerAccountsByKey.get(rule.destinationAccountKey)
+    if (!destinationAccount) {
+      warnings.push(
+        `Transfer rule "${rule.keyword}" targets unknown Manager bank/cash account key ${rule.destinationAccountKey} and was skipped.`,
+      )
+      continue
+    }
+
+    rules.push(
+      new LinkedAccountTransferRule({
+        sourceAccountKey: options.sourceAccount.key,
+        sourceAccountName: options.sourceAccount.name,
+        sourceAccountCurrency: options.sourceAccount.currency,
+        sourceAccountCanHavePendingTransactions: options.sourceAccount.canHavePendingTransactions,
+        keyword: rule.keyword,
+        normalizedKeyword: rule.normalizedKeyword,
+        destinationAccountKey: destinationAccount.key,
+        destinationAccountName: destinationAccount.name,
+        destinationAccountCurrency: destinationAccount.currency,
+        destinationAccountCanHavePendingTransactions: destinationAccount.canHavePendingTransactions,
+      }),
+    )
+  }
+
+  return { rules, warnings } as const
+}
+
+const formatTransferRuleSyntaxWarning = (reason: string, lineNumber: number) => {
+  switch (reason) {
+    case "missingComma":
+      return `Transfer rule line ${lineNumber} must use keyword,destination account key and was skipped.`
+    case "blankKeyword":
+      return `Transfer rule line ${lineNumber} has a blank keyword and was skipped.`
+    case "blankDestinationAccountKey":
+      return `Transfer rule line ${lineNumber} has a blank destination account key and was skipped.`
+    default:
+      return `Transfer rule line ${lineNumber} is invalid and was skipped.`
+  }
+}
 
 export class LinkedAccount extends Schema.Class<LinkedAccount>("LinkedAccount")({
   key: Schema.String,

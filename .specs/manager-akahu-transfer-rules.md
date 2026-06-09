@@ -22,7 +22,7 @@ The sync flow must load and validate these rules during setup/sync, match rules 
 
 - `apps/website/src/Manager/Flows.ts` ensures the credential custom fields and the `Akahu Account` dropdown field, then reads Manager bank/cash accounts and builds linked account setup state.
 - `collectManagerAkahuAccountSelections` reads the selected `Akahu Account` field and the multiline `Akahu Transfer Rules` field from `customFields2.strings`, validates rule destinations against the same Manager bank/cash account batch, and attaches non-blocking warnings to linked accounts.
-- `packages/domain/src/Manager/AkahuCustomFields.ts` models `LinkedAccount`, stale Akahu account selections, setup-state variants, the pure `AkahuTransferRule` parser/matcher, and setup-scoped linked-account transfer rule metadata.
+- `packages/domain/src/Manager/AkahuCustomFields.ts` models `LinkedAccount`, stale Akahu account selections, setup-state variants, the pure `AkahuTransferRule` parser/matcher, setup-scoped linked-account transfer rule metadata, and the shared `buildLinkedAccountTransferRules` helper for destination lookup, self-target rejection, metadata enrichment, de-duplication, and warning text.
 - `apps/website/src/Manager/SyncFlows.ts` orchestrates sync account-by-account. For each account it reads complete Manager receipts/payments, processes settled Akahu transactions first, then pending transactions when supported.
 - `packages/manager-api/src/ManagerAkahuTransactionSync.ts` contains pure sync helpers for amount normalization, pending fingerprints, duplicate decisions, pending-to-settled matching, stale pending detection, and summary counts.
 - `packages/manager-api/src/ManagerBatchPagination.ts` reads complete receipt/payment batches for one bank/cash account and indexes existing `fdxTransactionId` values.
@@ -277,11 +277,12 @@ Status: Completed.
 
 ### Task 2 Review: Setup Transfer Rule Code Quality Follow-Up
 
-Status: Pending.
+Status: In Progress.
 
-- Extract setup transfer-rule validation/enrichment out of `apps/website/src/Manager/Flows.ts` before wiring sync freshness. `parseLinkedAccountTransferRules` currently owns destination lookup, self-target rejection, metadata enrichment, and warning semantics inside setup, but Task 6 needs to re-read current Manager account custom fields at sync start and apply the same semantics. Move this into one canonical pure helper, such as `buildLinkedAccountTransferRules({ sourceAccount, rawValue, managerAccountsByKey })`, with a shared Manager bank/cash account metadata type so setup and sync cannot drift or duplicate the same branching.
+- Completed: Extract setup transfer-rule validation/enrichment out of `apps/website/src/Manager/Flows.ts` before wiring sync freshness. The canonical pure `buildLinkedAccountTransferRules({ sourceAccount, rawValue, managerAccountsByKey })` helper now owns destination lookup, self-target rejection, metadata enrichment, de-duplication, and warning semantics behind a shared Manager bank/cash account metadata type so setup and sync-start refresh can reuse the same behavior.
 - Collapse the custom-field ensure logic into a single canonical bank/cash account text-field helper before adding more setup fields. `ensureAccountField`, `createDropdownField`, `ensureMultilineAccountTextField`, and `createMultilineAccountTextField` now split related field invariants across multiple paths, and the multiline repair path spreads `...field.item` while changing `type`/`placement`, which can preserve stale type-specific data such as dropdown options. Prefer constructing a clean desired payload for create/update from `{ name, type, placement, optionsForDropdownList? }` and using one update path that preserves existing account-level values without carrying obsolete field-shape properties.
 - Add effect-level setup tests for the actual `Akahu Transfer Rules` custom-field create/update behavior, not only the pure `isManagerAkahuTransferRulesFieldCurrent` predicate. Cover missing-field creation, wrong-type repair, wrong-placement repair, and preservation of existing Manager account custom-field values through the field update path.
+- Validation for completed extraction: `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"`, `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm --filter @app/domain build`, `pnpm --filter website build`, and `pnpm ready`.
 
 ### Task 3: Extend Manager Sync Read For Inter-Account Transfers
 

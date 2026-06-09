@@ -1,13 +1,13 @@
 import { Manager } from "@/Manager"
 import { Context, Effect, Layer, Resource } from "effect"
 import {
+  buildLinkedAccountTransferRules,
   LinkedAccount,
-  LinkedAccountTransferRule,
   makeManagerAkahuSetupState,
   ManagerAkahuSetupError,
   ManagerAkahuSetupInvalidCredentials,
   ManagerAkahuSetupMissingCredentials,
-  parseAkahuTransferRules,
+  type ManagerAkahuTransferRuleAccountMetadata,
   type ManagerAkahuSetupState,
   StaleLinkedAccountSelection,
 } from "@app/domain/Manager/AkahuCustomFields"
@@ -253,7 +253,7 @@ export const collectManagerAkahuAccountSelections = (options: {
 }) => {
   const linkedAccounts: Array<LinkedAccount> = []
   const staleSelections: Array<StaleLinkedAccountSelection> = []
-  const managerAccountMetadata = new Map(
+  const managerAccountsByKey = new Map<string, ManagerAkahuTransferRuleAccountMetadata>(
     options.managerAccounts.map(({ item: account, key }) => [
       key,
       {
@@ -280,10 +280,10 @@ export const collectManagerAkahuAccountSelections = (options: {
     } as const
 
     if (akahuAccount) {
-      const transferRulesResult = parseLinkedAccountTransferRules({
+      const transferRulesResult = buildLinkedAccountTransferRules({
         sourceAccount: accountMetadata,
         rawValue: fields[options.transferRulesFieldKey],
-        managerAccountMetadata,
+        managerAccountsByKey,
       })
       linkedAccounts.push(
         new LinkedAccount({
@@ -321,82 +321,6 @@ const isMultilineAccountTextField = (field: {
 
 const sameStringSet = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
   left.length === right.length && right.every((value) => left.includes(value))
-
-const parseLinkedAccountTransferRules = (options: {
-  readonly sourceAccount: {
-    readonly key: string
-    readonly name: string
-    readonly currency: string | null
-    readonly canHavePendingTransactions: boolean
-  }
-  readonly rawValue: unknown
-  readonly managerAccountMetadata: ReadonlyMap<
-    string,
-    {
-      readonly key: string
-      readonly name: string
-      readonly currency: string | null
-      readonly canHavePendingTransactions: boolean
-    }
-  >
-}) => {
-  if (typeof options.rawValue !== "string" || options.rawValue.trim() === "") {
-    return { rules: [], warnings: [] } as const
-  }
-
-  const parsed = parseAkahuTransferRules(options.rawValue)
-  const rules: Array<LinkedAccountTransferRule> = []
-  const warnings = parsed.invalidLines.map((line) =>
-    formatTransferRuleSyntaxWarning(line.reason, line.lineNumber),
-  )
-
-  for (const rule of parsed.rules) {
-    if (rule.destinationAccountKey === options.sourceAccount.key) {
-      warnings.push(
-        `Transfer rule "${rule.keyword}" targets its own Manager bank/cash account and was skipped.`,
-      )
-      continue
-    }
-
-    const destinationAccount = options.managerAccountMetadata.get(rule.destinationAccountKey)
-    if (!destinationAccount) {
-      warnings.push(
-        `Transfer rule "${rule.keyword}" targets unknown Manager bank/cash account key ${rule.destinationAccountKey} and was skipped.`,
-      )
-      continue
-    }
-
-    rules.push(
-      new LinkedAccountTransferRule({
-        sourceAccountKey: options.sourceAccount.key,
-        sourceAccountName: options.sourceAccount.name,
-        sourceAccountCurrency: options.sourceAccount.currency,
-        sourceAccountCanHavePendingTransactions: options.sourceAccount.canHavePendingTransactions,
-        keyword: rule.keyword,
-        normalizedKeyword: rule.normalizedKeyword,
-        destinationAccountKey: destinationAccount.key,
-        destinationAccountName: destinationAccount.name,
-        destinationAccountCurrency: destinationAccount.currency,
-        destinationAccountCanHavePendingTransactions: destinationAccount.canHavePendingTransactions,
-      }),
-    )
-  }
-
-  return { rules, warnings } as const
-}
-
-const formatTransferRuleSyntaxWarning = (reason: string, lineNumber: number) => {
-  switch (reason) {
-    case "missingComma":
-      return `Transfer rule line ${lineNumber} must use keyword,destination account key and was skipped.`
-    case "blankKeyword":
-      return `Transfer rule line ${lineNumber} has a blank keyword and was skipped.`
-    case "blankDestinationAccountKey":
-      return `Transfer rule line ${lineNumber} has a blank destination account key and was skipped.`
-    default:
-      return `Transfer rule line ${lineNumber} is invalid and was skipped.`
-  }
-}
 
 export const mapAkahuAccountsReadFailure = (error: AkahuRpcError): ManagerAkahuSetupState => {
   switch (error.reason) {
