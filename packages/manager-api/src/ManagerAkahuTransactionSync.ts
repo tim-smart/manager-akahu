@@ -317,22 +317,27 @@ export const decideStalePendingEntries = (
       !input.processedFdxTransactionIds.has(entry.fdxTransactionId),
   )
 
-const getEntryKind = (entry: ManagerExistingFdxTransactionIdEntry): ManagerAkahuTransactionKind =>
-  entry._tag
+const getEntryKind = (
+  entry: ManagerExistingFdxTransactionIdEntry,
+): ManagerAkahuTransactionKind | "interAccountTransfer" => entry._tag
 
-const getEntryItem = (entry: ManagerExistingFdxTransactionIdEntry) =>
-  entry._tag === "receipt" ? entry.receipt.item : entry.payment.item
+const getEntryItem = (
+  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
+) => (entry._tag === "receipt" ? entry.receipt.item : entry.payment.item)
 
-const getEntryLineAmount = (entry: ManagerExistingFdxTransactionIdEntry): unknown =>
-  getEntryItem(entry).lines?.[0]?.amount
+const getEntryLineAmount = (
+  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
+): unknown => getEntryItem(entry).lines?.[0]?.amount
 
-const getEntryDescription = (entry: ManagerExistingFdxTransactionIdEntry): string => {
+const getEntryDescription = (
+  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
+): string => {
   const item = getEntryItem(entry)
   return item.description ?? item.lines?.[0]?.lineDescription ?? ""
 }
 
 const getEntryBankOrCashAccountKey = (
-  entry: ManagerExistingFdxTransactionIdEntry,
+  entry: Extract<ManagerExistingFdxTransactionIdEntry, { readonly _tag: "receipt" | "payment" }>,
 ): string | null | undefined =>
   entry._tag === "receipt" ? entry.receipt.item.receivedIn : entry.payment.item.paidFrom
 
@@ -368,6 +373,9 @@ export const decidePendingToSettledMatch = (
       continue
     }
     if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
+      continue
+    }
+    if (entry._tag === "interAccountTransfer") {
       continue
     }
     if (getEntryBankOrCashAccountKey(entry) !== input.syncRead.bankOrCashAccountKey) {

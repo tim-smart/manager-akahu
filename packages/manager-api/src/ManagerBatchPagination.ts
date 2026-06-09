@@ -1,10 +1,13 @@
 import { Effect } from "effect"
 import type {
+  Api4InterAccountTransferBatchParams,
   Api4PaymentBatchParams,
   Api4ReceiptBatchParams,
+  BusinessObjectsResourceOfInterAccountTransfer,
   BusinessObjectsResourceOfPayment,
   BusinessObjectsResourceOfReceipt,
   Client,
+  ItemOfInterAccountTransfer,
   ItemOfPayment,
   ItemOfReceipt,
 } from "./ManagerClient.ts"
@@ -18,8 +21,15 @@ export interface ManagerBankOrCashAccountBatchReadInput {
 
 export type ManagerReceiptBatchClient = Pick<Client, "GET/api4/receipt-batch">
 export type ManagerPaymentBatchClient = Pick<Client, "GET/api4/payment-batch">
+export type ManagerInterAccountTransferBatchClient = Pick<
+  Client,
+  "GET/api4/inter-account-transfer-batch"
+>
 export type ManagerBankOrCashAccountSyncReadClient = ManagerReceiptBatchClient &
-  ManagerPaymentBatchClient
+  ManagerPaymentBatchClient &
+  ManagerInterAccountTransferBatchClient
+
+export type ManagerExistingFdxTransactionIdTransferSide = "credit" | "debit"
 
 export type ManagerExistingFdxTransactionIdEntry =
   | {
@@ -34,11 +44,19 @@ export type ManagerExistingFdxTransactionIdEntry =
       readonly key: string
       readonly payment: ItemOfPayment
     }
+  | {
+      readonly _tag: "interAccountTransfer"
+      readonly fdxTransactionId: string
+      readonly key: string
+      readonly transferSide: ManagerExistingFdxTransactionIdTransferSide
+      readonly interAccountTransfer: ItemOfInterAccountTransfer
+    }
 
 export interface ManagerBankOrCashAccountSyncRead {
   readonly bankOrCashAccountKey: string
   readonly receipts: ReadonlyArray<ItemOfReceipt>
   readonly payments: ReadonlyArray<ItemOfPayment>
+  readonly interAccountTransfers: ReadonlyArray<ItemOfInterAccountTransfer>
   readonly existingFdxTransactionIdEntries: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
   readonly existingFdxTransactionIdIndex: ReadonlyMap<
     string,
@@ -63,6 +81,16 @@ const buildManagerPaymentBatchParams = (
   pageSize: number,
 ): Api4PaymentBatchParams => ({
   BankOrCashAccount: input.bankOrCashAccountKey,
+  Business: input.business,
+  Skip: skip,
+  PageSize: pageSize,
+})
+
+const buildManagerInterAccountTransferBatchParams = (
+  input: ManagerBankOrCashAccountBatchReadInput,
+  skip: number,
+  pageSize: number,
+): Api4InterAccountTransferBatchParams => ({
   Business: input.business,
   Skip: skip,
   PageSize: pageSize,
@@ -110,9 +138,11 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
   readonly bankOrCashAccountKey: string
   readonly receipts: ReadonlyArray<ItemOfReceipt>
   readonly payments: ReadonlyArray<ItemOfPayment>
+  readonly interAccountTransfers?: ReadonlyArray<ItemOfInterAccountTransfer>
 }): ManagerBankOrCashAccountSyncRead => {
   const entries: Array<ManagerExistingFdxTransactionIdEntry> = []
   const mutableIndex = new Map<string, Array<ManagerExistingFdxTransactionIdEntry>>()
+  const interAccountTransfers = input.interAccountTransfers ?? []
 
   for (const receipt of input.receipts) {
     const fdxTransactionId = receipt.item.fdxTransactionId
@@ -146,10 +176,47 @@ export const buildManagerBankOrCashAccountSyncRead = (input: {
     appendExistingFdxTransactionIdEntry(mutableIndex, entry)
   }
 
+  for (const interAccountTransfer of interAccountTransfers) {
+    const fdxCreditTransactionId = interAccountTransfer.item.fdxCreditTransactionId
+    if (
+      fdxCreditTransactionId !== undefined &&
+      fdxCreditTransactionId !== null &&
+      fdxCreditTransactionId !== ""
+    ) {
+      const entry: ManagerExistingFdxTransactionIdEntry = {
+        _tag: "interAccountTransfer",
+        fdxTransactionId: fdxCreditTransactionId,
+        key: interAccountTransfer.key,
+        transferSide: "credit",
+        interAccountTransfer,
+      }
+      entries.push(entry)
+      appendExistingFdxTransactionIdEntry(mutableIndex, entry)
+    }
+
+    const fdxDebitTransactionId = interAccountTransfer.item.fdxDebitTransactionId
+    if (
+      fdxDebitTransactionId !== undefined &&
+      fdxDebitTransactionId !== null &&
+      fdxDebitTransactionId !== ""
+    ) {
+      const entry: ManagerExistingFdxTransactionIdEntry = {
+        _tag: "interAccountTransfer",
+        fdxTransactionId: fdxDebitTransactionId,
+        key: interAccountTransfer.key,
+        transferSide: "debit",
+        interAccountTransfer,
+      }
+      entries.push(entry)
+      appendExistingFdxTransactionIdEntry(mutableIndex, entry)
+    }
+  }
+
   return {
     bankOrCashAccountKey: input.bankOrCashAccountKey,
     receipts: input.receipts,
     payments: input.payments,
+    interAccountTransfers,
     existingFdxTransactionIdEntries: entries,
     existingFdxTransactionIdIndex: new Map(mutableIndex),
   }
@@ -177,16 +244,40 @@ export const fetchAllManagerPaymentsForBankOrCashAccount = Effect.fn(
   })
 })
 
+export const fetchAllManagerInterAccountTransfersForBankOrCashAccount = Effect.fn(
+  "fetchAllManagerInterAccountTransfersForBankOrCashAccount",
+)(function* (
+  client: ManagerInterAccountTransferBatchClient,
+  input: ManagerBankOrCashAccountBatchReadInput,
+) {
+  const interAccountTransfers = yield* fetchAllManagerBatchItems({
+    input,
+    fetchPage: client["GET/api4/inter-account-transfer-batch"],
+    buildParams: buildManagerInterAccountTransferBatchParams,
+    getItems: (page: BusinessObjectsResourceOfInterAccountTransfer) => page.items,
+  })
+
+  return interAccountTransfers.filter(
+    (interAccountTransfer) =>
+      interAccountTransfer.item.paidFrom === input.bankOrCashAccountKey ||
+      interAccountTransfer.item.receivedIn === input.bankOrCashAccountKey,
+  )
+})
+
 export const fetchManagerBankOrCashAccountSyncRead = Effect.fn(
   "fetchManagerBankOrCashAccountSyncRead",
 )(function* (
   client: ManagerBankOrCashAccountSyncReadClient,
   input: ManagerBankOrCashAccountBatchReadInput,
 ) {
-  const { receipts, payments } = yield* Effect.all(
+  const { receipts, payments, interAccountTransfers } = yield* Effect.all(
     {
       receipts: fetchAllManagerReceiptsForBankOrCashAccount(client, input),
       payments: fetchAllManagerPaymentsForBankOrCashAccount(client, input),
+      interAccountTransfers: fetchAllManagerInterAccountTransfersForBankOrCashAccount(
+        client,
+        input,
+      ),
     },
     { concurrency: "unbounded" },
   )
@@ -194,5 +285,6 @@ export const fetchManagerBankOrCashAccountSyncRead = Effect.fn(
     bankOrCashAccountKey: input.bankOrCashAccountKey,
     receipts,
     payments,
+    interAccountTransfers,
   })
 })

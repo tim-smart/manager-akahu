@@ -25,8 +25,8 @@ The sync flow must load and validate these rules during setup/sync, match rules 
 - `packages/domain/src/Manager/AkahuCustomFields.ts` models `LinkedAccount`, stale Akahu account selections, setup-state variants, the pure `AkahuTransferRule` parser/matcher, setup-scoped linked-account transfer rule metadata, and the shared `buildLinkedAccountTransferRules` helper for destination lookup, self-target rejection, metadata enrichment, de-duplication, and warning text.
 - `apps/website/src/Manager/SyncFlows.ts` orchestrates sync account-by-account. For each account it reads complete Manager receipts/payments, processes settled Akahu transactions first, then pending transactions when supported.
 - `packages/manager-api/src/ManagerAkahuTransactionSync.ts` contains pure sync helpers for amount normalization, pending fingerprints, duplicate decisions, pending-to-settled matching, stale pending detection, and summary counts.
-- `packages/manager-api/src/ManagerBatchPagination.ts` reads complete receipt/payment batches for one bank/cash account and indexes existing `fdxTransactionId` values.
-- Existing receipt/payment de-duplication only indexes `Receipt.fdxTransactionId` and `Payment.fdxTransactionId`.
+- `packages/manager-api/src/ManagerBatchPagination.ts` reads complete receipt/payment batches for one bank/cash account, reads all inter-account transfer batch pages, filters transfers locally to the selected account on `paidFrom`/`receivedIn`, and indexes existing Akahu FDX values.
+- Existing de-duplication uses a common FDX index containing `Receipt.fdxTransactionId`, `Payment.fdxTransactionId`, `InterAccountTransfer.fdxCreditTransactionId`, and `InterAccountTransfer.fdxDebitTransactionId`; transfer entries preserve credit/debit side metadata.
 - The generated Manager client exposes inter-account transfer APIs and payload fields:
   - `POST/api4/inter-account-transfer`
   - `PUT/api4/inter-account-transfer`
@@ -287,13 +287,15 @@ Status: Completed.
 
 ### Task 3: Extend Manager Sync Read For Inter-Account Transfers
 
+Status: Completed.
+
 - Extend `ManagerBatchPagination.ts` to fetch all `inter-account-transfer-batch` pages.
 - Filter fetched transfers locally for the selected account key on `paidFrom` or `receivedIn`.
 - Extend the sync-read model with transfer items and a common FDX index that includes receipt/payment `fdxTransactionId`, transfer `fdxCreditTransactionId`, and transfer `fdxDebitTransactionId`.
 - Preserve existing receipt/payment public behavior and tests.
 - Add focused tests for pagination, local filtering, and both transfer FDX sides.
 - Update website sync-flow test client mocks to provide `GET/api4/inter-account-transfer-batch` if the public sync-read client type requires it, without changing sync behavior yet.
-- Validation: `pnpm test "packages/manager-api/tests/ManagerBatchPagination.test.ts"`, `pnpm --filter @app/manager-api build`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, and `pnpm --filter website build`.
+- Validation: `pnpm test "packages/manager-api/tests/ManagerBatchPagination.test.ts"`, `pnpm --filter @app/manager-api build`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, and `pnpm --filter website build`; all passed.
 
 ### Task 4: Add Pure Transfer Payload And Fingerprint Helpers
 

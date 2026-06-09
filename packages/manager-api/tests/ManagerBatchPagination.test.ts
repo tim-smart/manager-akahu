@@ -3,6 +3,9 @@ import { expect, it } from "@effect/vitest"
 import type {
   ManagerBankOrCashAccountBatchReadInput,
   ManagerBankOrCashAccountSyncReadClient,
+  ManagerInterAccountTransferBatchClient,
+  ManagerInterAccountTransferBatchParams,
+  ManagerInterAccountTransferItem,
   ManagerPaymentBatchClient,
   ManagerPaymentBatchParams,
   ManagerPaymentItem,
@@ -11,6 +14,7 @@ import type {
   ManagerReceiptItem,
 } from "../src/index.ts"
 import {
+  fetchAllManagerInterAccountTransfersForBankOrCashAccount,
   fetchManagerBankOrCashAccountSyncRead,
   fetchAllManagerPaymentsForBankOrCashAccount,
   fetchAllManagerReceiptsForBankOrCashAccount,
@@ -40,12 +44,25 @@ const paymentItem = (key: string, fdxTransactionId: string): ManagerPaymentItem 
   _actions: null,
 })
 
+const interAccountTransferItem = (
+  key: string,
+  item: ManagerInterAccountTransferItem["item"],
+): ManagerInterAccountTransferItem => ({
+  key,
+  item,
+  _links: null,
+  _actions: null,
+})
+
 const pageSkip = (pageIndex: number) => pageIndex * fullPageSize
 
 const pageItemNumber = (pageIndex: number, pageOffset = 0) => pageSkip(pageIndex) + pageOffset + 1
 
-const itemKey = (kind: "receipt" | "payment", pageIndex: number, pageOffset = 0) =>
-  `${kind}-${pageItemNumber(pageIndex, pageOffset)}`
+const itemKey = (
+  kind: "receipt" | "payment" | "inter-account-transfer",
+  pageIndex: number,
+  pageOffset = 0,
+) => `${kind}-${pageItemNumber(pageIndex, pageOffset)}`
 
 const totalItems = (...pageCounts: ReadonlyArray<number>) =>
   pageCounts.reduce((total, pageCount) => total + pageCount, 0)
@@ -70,6 +87,19 @@ const paymentItems = (
     return paymentItem(`payment-${keyNumber}`, fdxTransactionIds.get(index) ?? "")
   })
 
+const interAccountTransferItems = (
+  pageIndex: number,
+  count: number,
+  items: ReadonlyMap<number, ManagerInterAccountTransferItem["item"]> = new Map(),
+): ReadonlyArray<ManagerInterAccountTransferItem> =>
+  Array.from({ length: count }, (_, index) => {
+    const keyNumber = pageItemNumber(pageIndex, index)
+    return interAccountTransferItem(
+      `inter-account-transfer-${keyNumber}`,
+      items.get(index) ?? { paidFrom: bankOrCashAccountKey, receivedIn: "bank-other" },
+    )
+  })
+
 const receiptPage = (
   pageIndex: number,
   count: number,
@@ -86,6 +116,15 @@ const paymentPage = (
 ): readonly [number, ReadonlyArray<ManagerPaymentItem>] => [
   pageSkip(pageIndex),
   paymentItems(pageIndex, count, fdxTransactionIds),
+]
+
+const interAccountTransferPage = (
+  pageIndex: number,
+  count: number,
+  items: ReadonlyMap<number, ManagerInterAccountTransferItem["item"]> = new Map(),
+): readonly [number, ReadonlyArray<ManagerInterAccountTransferItem>] => [
+  pageSkip(pageIndex),
+  interAccountTransferItems(pageIndex, count, items),
 ]
 
 const expectKeyAtPageOffset = (
@@ -105,6 +144,20 @@ const expectBatchRequests = (
   expect(requests).toEqual(
     pageIndexes.map((pageIndex) => ({
       BankOrCashAccount: bankOrCashAccountKey,
+      Business: options.business,
+      Skip: pageSkip(pageIndex),
+      PageSize: managerBatchReadDefaultPageSize,
+    })),
+  )
+}
+
+const expectInterAccountTransferBatchRequests = (
+  requests: ReadonlyArray<ManagerInterAccountTransferBatchParams>,
+  pageIndexes: ReadonlyArray<number>,
+  options: { readonly business?: string } = {},
+) => {
+  expect(requests).toEqual(
+    pageIndexes.map((pageIndex) => ({
       Business: options.business,
       Skip: pageSkip(pageIndex),
       PageSize: managerBatchReadDefaultPageSize,
@@ -142,14 +195,38 @@ const makePaymentBatchClient = (
     }),
 })
 
+const makeInterAccountTransferBatchClient = (
+  pages: ReadonlyMap<number, ReadonlyArray<ManagerInterAccountTransferItem>>,
+  requests: Array<ManagerInterAccountTransferBatchParams>,
+): ManagerInterAccountTransferBatchClient => ({
+  "GET/api4/inter-account-transfer-batch": (options) =>
+    Effect.sync(() => {
+      requests.push(options ?? {})
+      return {
+        _links: null,
+        _actions: null,
+        items: pages.get(Number(options?.Skip ?? 0)) ?? [],
+      }
+    }),
+})
+
 const makeSyncReadClient = (options: {
   readonly receiptPages: ReadonlyMap<number, ReadonlyArray<ManagerReceiptItem>>
   readonly receiptRequests: Array<ManagerReceiptBatchParams>
   readonly paymentPages: ReadonlyMap<number, ReadonlyArray<ManagerPaymentItem>>
   readonly paymentRequests: Array<ManagerPaymentBatchParams>
+  readonly interAccountTransferPages?: ReadonlyMap<
+    number,
+    ReadonlyArray<ManagerInterAccountTransferItem>
+  >
+  readonly interAccountTransferRequests?: Array<ManagerInterAccountTransferBatchParams>
 }): ManagerBankOrCashAccountSyncReadClient => ({
   ...makeReceiptBatchClient(options.receiptPages, options.receiptRequests),
   ...makePaymentBatchClient(options.paymentPages, options.paymentRequests),
+  ...makeInterAccountTransferBatchClient(
+    options.interAccountTransferPages ?? new Map(),
+    options.interAccountTransferRequests ?? [],
+  ),
 })
 
 it.effect("fetches every Manager receipt batch page for the selected bank/cash account", () =>
@@ -197,11 +274,54 @@ it.effect("fetches every Manager payment batch page for the selected bank/cash a
 )
 
 it.effect(
-  "fetches the canonical Manager sync read model with receipt and payment fdxTransactionId entries",
+  "fetches every Manager inter-account transfer page and filters to the selected account",
+  () =>
+    Effect.gen(function* () {
+      const requests: Array<ManagerInterAccountTransferBatchParams> = []
+      const unrelatedTransfer = { paidFrom: "bank-unrelated-1", receivedIn: "bank-unrelated-2" }
+      const pages = new Map<number, ReadonlyArray<ManagerInterAccountTransferItem>>([
+        interAccountTransferPage(0, fullPageSize),
+        interAccountTransferPage(
+          1,
+          3,
+          new Map([
+            [0, { paidFrom: "bank-other", receivedIn: bankOrCashAccountKey }],
+            [1, unrelatedTransfer],
+            [2, { paidFrom: bankOrCashAccountKey, receivedIn: "bank-other" }],
+          ]),
+        ),
+      ])
+      const client = makeInterAccountTransferBatchClient(pages, requests)
+
+      const interAccountTransfers = yield* fetchAllManagerInterAccountTransfersForBankOrCashAccount(
+        client,
+        publicSyncReadInput,
+      )
+
+      expect(interAccountTransfers).toHaveLength(totalItems(fullPageSize, 2))
+      expect(interAccountTransfers[0]?.key).toBe(itemKey("inter-account-transfer", 0))
+      expect(interAccountTransfers.at(-2)?.item).toEqual({
+        paidFrom: "bank-other",
+        receivedIn: bankOrCashAccountKey,
+      })
+      expect(interAccountTransfers.at(-1)?.item).toEqual({
+        paidFrom: bankOrCashAccountKey,
+        receivedIn: "bank-other",
+      })
+      expect(interAccountTransfers.some((transfer) => transfer.item === unrelatedTransfer)).toBe(
+        false,
+      )
+      expectInterAccountTransferBatchRequests(requests, [0, 1], { business })
+    }),
+)
+
+it.effect(
+  "fetches the canonical Manager sync read model with receipt, payment, and transfer fdx entries",
   () =>
     Effect.gen(function* () {
       const receiptRequests: Array<ManagerReceiptBatchParams> = []
       const paymentRequests: Array<ManagerPaymentBatchParams> = []
+      const interAccountTransferRequests: Array<ManagerInterAccountTransferBatchParams> = []
       const receiptPages = new Map<number, ReadonlyArray<ManagerReceiptItem>>([
         receiptPage(0, fullPageSize, new Map([[0, "receipt-first-page"]])),
         receiptPage(
@@ -231,17 +351,43 @@ it.effect(
           ]),
         ),
       ])
+      const interAccountTransfer = interAccountTransferItem("inter-account-transfer-1", {
+        paidFrom: bankOrCashAccountKey,
+        receivedIn: "bank-other",
+        fdxCreditTransactionId: "akahu-tx-existing",
+        fdxDebitTransactionId: "transfer-debit",
+      })
+      const interAccountTransferPages = new Map<
+        number,
+        ReadonlyArray<ManagerInterAccountTransferItem>
+      >([
+        [
+          0,
+          [
+            interAccountTransfer,
+            interAccountTransferItem("inter-account-transfer-unrelated", {
+              paidFrom: "bank-unrelated-1",
+              receivedIn: "bank-unrelated-2",
+              fdxCreditTransactionId: "unrelated-credit",
+              fdxDebitTransactionId: "unrelated-debit",
+            }),
+          ],
+        ],
+      ])
       const client = makeSyncReadClient({
         receiptPages,
         receiptRequests,
         paymentPages,
         paymentRequests,
+        interAccountTransferPages,
+        interAccountTransferRequests,
       })
 
       const syncRead = yield* fetchManagerBankOrCashAccountSyncRead(client, publicSyncReadInput)
       expect(syncRead.bankOrCashAccountKey).toBe(bankOrCashAccountKey)
       expect(syncRead.receipts).toHaveLength(totalItems(fullPageSize, 2))
       expect(syncRead.payments).toHaveLength(totalItems(fullPageSize, 2))
+      expect(syncRead.interAccountTransfers).toEqual([interAccountTransfer])
       expectKeyAtPageOffset(syncRead.receipts, "receipt", 0)
       expectKeyAtPageOffset(syncRead.receipts, "receipt", 1)
       expectKeyAtPageOffset(syncRead.payments, "payment", 0)
@@ -256,6 +402,8 @@ it.effect(
         "payment-2",
         "akahu-tx-existing",
         "payment-last",
+        "akahu-tx-existing",
+        "transfer-debit",
       ])
       expect(syncRead.existingFdxTransactionIdIndex.get("akahu-tx-existing")).toEqual([
         {
@@ -270,8 +418,25 @@ it.effect(
           key: itemKey("payment", 1),
           payment: paymentItem(itemKey("payment", 1), "akahu-tx-existing"),
         },
+        {
+          _tag: "interAccountTransfer",
+          fdxTransactionId: "akahu-tx-existing",
+          key: "inter-account-transfer-1",
+          transferSide: "credit",
+          interAccountTransfer,
+        },
+      ])
+      expect(syncRead.existingFdxTransactionIdIndex.get("transfer-debit")).toEqual([
+        {
+          _tag: "interAccountTransfer",
+          fdxTransactionId: "transfer-debit",
+          key: "inter-account-transfer-1",
+          transferSide: "debit",
+          interAccountTransfer,
+        },
       ])
       expectBatchRequests(receiptRequests, [0, 1], { business })
       expectBatchRequests(paymentRequests, [0, 1], { business })
+      expectInterAccountTransferBatchRequests(interAccountTransferRequests, [0], { business })
     }),
 )

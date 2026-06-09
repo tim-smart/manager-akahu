@@ -108,6 +108,7 @@ const makePendingTransaction = (description: string, amount: string) =>
 const makeMockClient = () => {
   const receiptBatchRequests: Array<unknown> = []
   const paymentBatchRequests: Array<unknown> = []
+  const interAccountTransferBatchRequests: Array<unknown> = []
   const receiptPayloads: Array<unknown> = []
   const paymentPayloads: Array<unknown> = []
   const receiptPutPayloads: Array<unknown> = []
@@ -135,6 +136,14 @@ const makeMockClient = () => {
         items: [] as ReadonlyArray<ItemOfPayment>,
       })
     },
+    "GET/api4/inter-account-transfer-batch": (params) => {
+      interAccountTransferBatchRequests.push(params)
+      return Effect.succeed({
+        _links: null,
+        _actions: null,
+        items: [],
+      })
+    },
     "POST/api4/receipt": (payload) => {
       receiptPayloads.push(payload)
       return Effect.succeed(true)
@@ -157,6 +166,7 @@ const makeMockClient = () => {
     client,
     receiptBatchRequests,
     paymentBatchRequests,
+    interAccountTransferBatchRequests,
     receiptPayloads,
     paymentPayloads,
     receiptPutPayloads,
