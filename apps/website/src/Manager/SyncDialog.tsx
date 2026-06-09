@@ -6,6 +6,7 @@ import type { ManagerAkahuTransactionSyncSummary } from "./SyncFlows"
 import {
   canCloseManagerAkahuSyncDialog,
   canStartManagerAkahuSyncDialog,
+  formatManagerAkahuStartDate,
   managerAkahuSyncSummaryRows,
   type ManagerAkahuSyncDialogState,
 } from "./SyncUi"
@@ -159,7 +160,8 @@ function SyncAccountList(props: {
               </span>
             </div>
             <div className="mt-1 text-muted-foreground">
-              Akahu: {account.akahuAccount.name}. Pending transactions:{" "}
+              Akahu: {account.akahuAccount.name}. Start date: {formatManagerAkahuStartDate(account)}
+              . Pending transactions:{" "}
               {account.canHavePendingTransactions ? "included" : "not supported"}.
             </div>
           </li>

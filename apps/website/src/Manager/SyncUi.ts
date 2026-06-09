@@ -3,6 +3,7 @@ import {
   managerAkahuSyncSummaryCountKeys,
   type ManagerAkahuSyncSummaryCountKey,
 } from "@app/manager-api/ManagerAkahuTransactionSync"
+import { DateTime, Option } from "effect"
 import type { ManagerAkahuTransactionSyncSummary } from "./SyncFlows"
 
 export type ManagerAkahuSyncDialogState =
@@ -83,6 +84,11 @@ export const canStartManagerAkahuSyncDialog = (
 
 export const canCloseManagerAkahuSyncDialog = (state: ManagerAkahuSyncDialogState): boolean =>
   state._tag !== "running"
+
+export const formatManagerAkahuStartDate = (account: LinkedAccount): string => {
+  const startDate = Option.getOrUndefined(account.akahuStartDate)
+  return startDate === undefined ? "Not set" : DateTime.formatIsoDateUtc(startDate)
+}
 
 export const sanitizeManagerAkahuSyncDialogText = (text: string): string =>
   text

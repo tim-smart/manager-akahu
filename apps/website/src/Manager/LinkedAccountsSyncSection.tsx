@@ -4,7 +4,11 @@ import type { LinkedAccount, ManagerAkahuSetupState } from "@app/domain/Manager/
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { SyncDialogContent } from "./SyncDialog"
-import { canCloseManagerAkahuSyncDialog, type ManagerAkahuSyncDialogState } from "./SyncUi"
+import {
+  canCloseManagerAkahuSyncDialog,
+  formatManagerAkahuStartDate,
+  type ManagerAkahuSyncDialogState,
+} from "./SyncUi"
 import { SetupMessage, SetupStack, StaleSelections } from "./SetupUi"
 
 type ReadyManagerAkahuSetupState = Extract<ManagerAkahuSetupState, { readonly _tag: "ready" }>
@@ -73,11 +77,9 @@ function LinkedAccountsList(props: {
             </div>
             <div className="grid gap-2 text-sm sm:grid-cols-2">
               <AccountMetadata
-                label="Manager key"
-                value={account.key}
-                valueClassName="font-mono break-all"
+                label="Akahu start date"
+                value={formatManagerAkahuStartDate(account)}
               />
-              <AccountMetadata label="Currency" value={account.currency ?? "Base currency"} />
               <AccountMetadata
                 label="Pending transactions"
                 value={account.canHavePendingTransactions ? "Supported" : "Not supported"}
