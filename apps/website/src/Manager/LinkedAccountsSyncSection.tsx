@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { Dialog } from "radix-ui"
 import type { LinkedAccount, ManagerAkahuSetupState } from "@app/domain/Manager/AkahuCustomFields"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { SyncDialogContent } from "./SyncDialog"
 import { canCloseManagerAkahuSyncDialog, type ManagerAkahuSyncDialogState } from "./SyncUi"
 import { SetupMessage, SetupStack, StaleSelections } from "./SetupUi"
@@ -71,12 +72,26 @@ function LinkedAccountsList(props: {
               <p className="text-sm text-muted-foreground">{account.akahuAccount.name}</p>
             </div>
             <div className="grid gap-2 text-sm sm:grid-cols-2">
+              <AccountMetadata
+                label="Manager key"
+                value={account.key}
+                valueClassName="font-mono break-all"
+              />
               <AccountMetadata label="Currency" value={account.currency ?? "Base currency"} />
               <AccountMetadata
                 label="Pending transactions"
                 value={account.canHavePendingTransactions ? "Supported" : "Not supported"}
               />
+              <AccountMetadata
+                label="Transfer rules"
+                value={
+                  account.transferRules.length === 1
+                    ? "1 valid rule"
+                    : `${account.transferRules.length} valid rules`
+                }
+              />
             </div>
+            <TransferRuleWarnings account={account} />
             <SyncDialogTriggerButton
               accounts={[account]}
               variant="outline"
@@ -115,13 +130,32 @@ function SyncDialogTriggerButton(props: {
   )
 }
 
-function AccountMetadata(props: { readonly label: string; readonly value: string }) {
+function TransferRuleWarnings(props: { readonly account: LinkedAccount }) {
+  if (props.account.transferRuleWarnings.length === 0) return null
+
+  return (
+    <section className="flex flex-col gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+      <div className="font-medium">Transfer rule warnings</div>
+      <ul className="flex flex-col gap-1 text-muted-foreground">
+        {props.account.transferRuleWarnings.map((warning, index) => (
+          <li key={`${props.account.key}-${index}`}>{warning}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function AccountMetadata(props: {
+  readonly label: string
+  readonly value: string
+  readonly valueClassName?: string
+}) {
   return (
     <div className="rounded-md bg-muted px-3 py-2">
       <div className="text-[0.7rem] font-medium tracking-[0.16em] text-muted-foreground uppercase">
         {props.label}
       </div>
-      <div className="mt-1 text-sm">{props.value}</div>
+      <div className={cn("mt-1 text-sm", props.valueClassName)}>{props.value}</div>
     </div>
   )
 }

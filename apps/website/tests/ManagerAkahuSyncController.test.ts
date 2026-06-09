@@ -38,6 +38,8 @@ const linkedAccount = () =>
     currency: null,
     canHavePendingTransactions: true,
     akahuAccount,
+    transferRules: [],
+    transferRuleWarnings: [],
   })
 
 const summaryFor = (account: LinkedAccount): ManagerAkahuTransactionSyncSummary => ({

@@ -41,6 +41,8 @@ const linkedAccount = new LinkedAccount({
   currency: null,
   canHavePendingTransactions: true,
   akahuAccount,
+  transferRules: [],
+  transferRuleWarnings: [],
 })
 
 const unsupportedForeignCurrencyLinkedAccount = new LinkedAccount({
@@ -49,6 +51,8 @@ const unsupportedForeignCurrencyLinkedAccount = new LinkedAccount({
   currency: "USD",
   canHavePendingTransactions: true,
   akahuAccount,
+  transferRules: [],
+  transferRuleWarnings: [],
 })
 
 const zeroPendingFingerprint = "akahu-pending:v1:akahu-checking:2026-06-05:0.00:zero coffee"

@@ -21,8 +21,8 @@ The sync flow must load and validate these rules during setup/sync, match rules 
 ## Current Implementation Findings
 
 - `apps/website/src/Manager/Flows.ts` ensures the credential custom fields and the `Akahu Account` dropdown field, then reads Manager bank/cash accounts and builds linked account setup state.
-- `collectManagerAkahuAccountSelections` currently reads only one Manager custom field from `customFields2.strings`: the `Akahu Account` field selected on each bank/cash account.
-- `packages/domain/src/Manager/AkahuCustomFields.ts` models `LinkedAccount`, stale Akahu account selections, setup-state variants, and the pure `AkahuTransferRule` parser/matcher. `LinkedAccount` does not yet carry transfer rules.
+- `collectManagerAkahuAccountSelections` reads the selected `Akahu Account` field and the multiline `Akahu Transfer Rules` field from `customFields2.strings`, validates rule destinations against the same Manager bank/cash account batch, and attaches non-blocking warnings to linked accounts.
+- `packages/domain/src/Manager/AkahuCustomFields.ts` models `LinkedAccount`, stale Akahu account selections, setup-state variants, the pure `AkahuTransferRule` parser/matcher, and setup-scoped linked-account transfer rule metadata.
 - `apps/website/src/Manager/SyncFlows.ts` orchestrates sync account-by-account. For each account it reads complete Manager receipts/payments, processes settled Akahu transactions first, then pending transactions when supported.
 - `packages/manager-api/src/ManagerAkahuTransactionSync.ts` contains pure sync helpers for amount normalization, pending fingerprints, duplicate decisions, pending-to-settled matching, stale pending detection, and summary counts.
 - `packages/manager-api/src/ManagerBatchPagination.ts` reads complete receipt/payment batches for one bank/cash account and indexes existing `fdxTransactionId` values.
@@ -264,6 +264,8 @@ Status: Completed.
 
 ### Task 2: Load `Akahu Transfer Rules` During Setup
 
+Status: Completed.
+
 - Add a named constant for the `Akahu Transfer Rules` field.
 - Ensure setup creates the multiline bank/cash account custom field using Manager field `type: 1`.
 - Read all Manager bank/cash accounts once and use that same batch to validate destination account keys.
@@ -271,7 +273,7 @@ Status: Completed.
 - Extend `LinkedAccount` to carry valid transfer rules and rule warnings.
 - Update ready-state UI to show transfer-rule count and non-blocking rule warnings.
 - Keep existing setup states and stale Akahu account selection behavior unchanged.
-- Validation: `pnpm --filter @app/domain build`, `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm test:website-sync-controller`, and `pnpm --filter website build`.
+- Validation: `pnpm test "apps/website/tests/ManagerFlows.test.ts"`, `pnpm --filter @app/domain build`, `pnpm test:website-sync-controller`, `pnpm --filter website build`, `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"`, `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"`, and `pnpm ready`.
 
 ### Task 3: Extend Manager Sync Read For Inter-Account Transfers
 

@@ -100,12 +100,29 @@ export const matchesAkahuTransferRuleDescription = (
   description: string,
 ): boolean => normalizeAkahuTransferRuleText(description).includes(rule.normalizedKeyword)
 
+export class LinkedAccountTransferRule extends Schema.Class<LinkedAccountTransferRule>(
+  "LinkedAccountTransferRule",
+)({
+  sourceAccountKey: Schema.String,
+  sourceAccountName: Schema.String,
+  sourceAccountCurrency: Schema.NullOr(Schema.String),
+  sourceAccountCanHavePendingTransactions: Schema.Boolean,
+  keyword: Schema.String,
+  normalizedKeyword: Schema.String,
+  destinationAccountKey: Schema.String,
+  destinationAccountName: Schema.String,
+  destinationAccountCurrency: Schema.NullOr(Schema.String),
+  destinationAccountCanHavePendingTransactions: Schema.Boolean,
+}) {}
+
 export class LinkedAccount extends Schema.Class<LinkedAccount>("LinkedAccount")({
   key: Schema.String,
   name: Schema.String,
   currency: Schema.NullOr(Schema.String),
   canHavePendingTransactions: Schema.Boolean,
   akahuAccount: Account,
+  transferRules: Schema.Array(LinkedAccountTransferRule),
+  transferRuleWarnings: Schema.Array(Schema.String),
 }) {}
 
 export class StaleLinkedAccountSelection extends Schema.Class<StaleLinkedAccountSelection>(

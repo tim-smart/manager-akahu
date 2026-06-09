@@ -5,6 +5,7 @@ import { makeManagerAkahuSetupState } from "@app/domain/Manager/AkahuCustomField
 import { AkahuRpcError } from "@app/domain/rpc"
 import {
   collectManagerAkahuAccountSelections,
+  isManagerAkahuTransferRulesFieldCurrent,
   mapAkahuAccountsReadFailure,
 } from "../src/Manager/Flows.ts"
 
@@ -21,6 +22,7 @@ const akahuChecking = new Account({
 test("collects linked Manager accounts with sync setup metadata", () => {
   const selections = collectManagerAkahuAccountSelections({
     accountFieldKey: "akahu-field",
+    transferRulesFieldKey: "transfer-rules-field",
     akahuAccounts: [akahuChecking],
     managerAccounts: [
       {
@@ -47,6 +49,8 @@ test("collects linked Manager accounts with sync setup metadata", () => {
       currency: "NZD",
       canHavePendingTransactions: true,
       akahuAccount: akahuChecking,
+      transferRules: [],
+      transferRuleWarnings: [],
     },
   ])
 })
@@ -54,6 +58,7 @@ test("collects linked Manager accounts with sync setup metadata", () => {
 test("collects stale Manager Akahu account selections separately", () => {
   const selections = collectManagerAkahuAccountSelections({
     accountFieldKey: "akahu-field",
+    transferRulesFieldKey: "transfer-rules-field",
     akahuAccounts: [akahuChecking],
     managerAccounts: [
       {
@@ -87,6 +92,7 @@ test("collects stale Manager Akahu account selections separately", () => {
 test("classifies setup state from Akahu account and Manager link availability", () => {
   const staleSelections = collectManagerAkahuAccountSelections({
     accountFieldKey: "akahu-field",
+    transferRulesFieldKey: "transfer-rules-field",
     akahuAccounts: [akahuChecking],
     managerAccounts: [
       {
@@ -123,6 +129,7 @@ test("classifies setup state from Akahu account and Manager link availability", 
     linkedAccounts: [
       ...collectManagerAkahuAccountSelections({
         accountFieldKey: "akahu-field",
+        transferRulesFieldKey: "transfer-rules-field",
         akahuAccounts: [akahuChecking],
         managerAccounts: [
           {
@@ -145,6 +152,77 @@ test("classifies setup state from Akahu account and Manager link availability", 
   if (ready._tag === "ready") {
     expect(ready.staleSelections).toHaveLength(1)
   }
+})
+
+test("parses linked-account transfer rules and non-blocking warnings", () => {
+  const selections = collectManagerAkahuAccountSelections({
+    accountFieldKey: "akahu-field",
+    transferRulesFieldKey: "transfer-rules-field",
+    akahuAccounts: [akahuChecking],
+    managerAccounts: [
+      {
+        key: "manager-checking",
+        item: {
+          name: "Manager Checking",
+          currency: null,
+          canHavePendingTransactions: true,
+          customFields2: {
+            strings: {
+              "akahu-field": "Akahu Checking - akahu-checking",
+              "transfer-rules-field":
+                "Coffee,manager-savings\nmissing comma\nRent,manager-missing\nSelf,manager-checking",
+            },
+          },
+        },
+      },
+      {
+        key: "manager-savings",
+        item: {
+          name: "Manager Savings",
+          currency: "NZD",
+          canHavePendingTransactions: false,
+        },
+      },
+    ],
+  })
+
+  expect(selections.staleSelections).toEqual([])
+  expect(selections.linkedAccounts).toHaveLength(1)
+  expect(selections.linkedAccounts[0].transferRules).toMatchObject([
+    {
+      sourceAccountKey: "manager-checking",
+      sourceAccountName: "Manager Checking",
+      sourceAccountCurrency: null,
+      sourceAccountCanHavePendingTransactions: true,
+      keyword: "Coffee",
+      normalizedKeyword: "coffee",
+      destinationAccountKey: "manager-savings",
+      destinationAccountName: "Manager Savings",
+      destinationAccountCurrency: "NZD",
+      destinationAccountCanHavePendingTransactions: false,
+    },
+  ])
+  expect(selections.linkedAccounts[0].transferRuleWarnings).toEqual([
+    "Transfer rule line 2 must use keyword,destination account key and was skipped.",
+    'Transfer rule "Rent" targets unknown Manager bank/cash account key manager-missing and was skipped.',
+    'Transfer rule "Self" targets its own Manager bank/cash account and was skipped.',
+  ])
+})
+
+test("recognizes current multiline Manager bank/cash transfer-rule fields", () => {
+  expect(
+    isManagerAkahuTransferRulesFieldCurrent({
+      type: 1,
+      placement: ["1408c33b-6284-4f50-9e31-48cbea21f3cf"],
+    }),
+  ).toBe(true)
+  expect(
+    isManagerAkahuTransferRulesFieldCurrent({
+      type: 2,
+      placement: ["1408c33b-6284-4f50-9e31-48cbea21f3cf"],
+    }),
+  ).toBe(false)
+  expect(isManagerAkahuTransferRulesFieldCurrent({ type: 1, placement: [] })).toBe(false)
 })
 
 test("maps typed Akahu authentication failures to invalid credentials", () => {
