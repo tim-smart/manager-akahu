@@ -429,15 +429,6 @@ Status: Completed.
 - Completed: Pending endpoint success now tracks current transfer pending fingerprints separately from receipt/payment fingerprints and reports stale pending inter-account transfers with both `stalePendingTransfersDetected` and aggregate `stalePendingDetected` counts.
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
-### Task 8 Review: Pending Transfer Sync Code Quality Follow-Up
-
-Status: Pending.
-
-- Structural issue: pending transfer writes were wired as a separate website orchestration branch that only handles exact duplicate update, create, and warning skips. It does not run the mirrored-transfer candidate flow before create, so a pending transaction from the second synced account can create a second Manager inter-account transfer instead of merging into the first pending transfer, despite the requirement that mirror merging applies to pending transfer entries too.
-- Preferred remedy: collapse settled and pending transfer write branching into a pure manager-api transfer write decision boundary, returning explicit outcomes such as `create`, `mirrorMerge`, `exactPendingUpdate`, `pendingToSettledUpdate`, `duplicateSkip`, and `warningSkip` with the Manager POST/PUT payload where applicable. Website sync should only increment match counts, execute the selected write, and apply the returned state/count effects. Add pending mirror-merge coverage, including same-run sync-all behavior.
-- Boundary issue: exact pending transfer updates currently reuse the broad duplicate helper and PUT the canonical one-sided pending payload directly from website code. The duplicate helper accepts `sourceTransferSide` and `payload` but does not validate them for a same-side exact pending match, and the canonical payload can omit an already-populated opposite-side FDX field if a pending transfer has been merged.
-- Preferred remedy: add a dedicated pending-transfer exact fingerprint decision and pending-transfer update payload builder in `packages/manager-api/src/ManagerAkahuTransactionSync.ts`. The decision should validate that the existing entry is a single inter-account transfer on the expected source side; the payload builder should start from the existing transfer item and explicitly preserve unrelated fields and the opposite-side FDX while refreshing only the intended canonical pending fields. Add regression coverage for numeric/string amounts where relevant, same-side validation, opposite-side FDX preservation, and ambiguous/wrong-kind duplicate skips.
-
 ## Open Questions
 
 - None.
