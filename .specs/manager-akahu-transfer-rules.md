@@ -358,6 +358,8 @@ Status: Completed.
 
 ### Task 6: Wire Settled Transfer Create And Duplicate Skip
 
+Status: Completed.
+
 - Extend `ManagerAkahuTransactionSyncManagerClient` with `POST/api4/inter-account-transfer` and `PUT/api4/inter-account-transfer`.
 - Re-read selected Manager bank/cash account custom-field values at sync start and parse current transfer rules before transaction processing.
 - In settled processing, check transfer rules before receipt/payment classification.
@@ -366,7 +368,11 @@ Status: Completed.
 - Ensure transfer creates record processed FDX IDs and update transfer summary counts.
 - Preserve the existing five-overlap settled stop behavior for ordinary settled duplicates; transfer duplicates by existing Manager transfer FDX IDs should count as duplicates and participate in the same overlap policy when they prove the settled Akahu ID is already imported.
 - Add website sync-flow tests for settled transfer create, duplicate skip, receipt/payment bypass, invalid destination skip, destination foreign-currency skip, and summary counts.
-- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build`.
+- Completed: `apps/website/src/Manager/SyncFlows.ts` now refreshes the `Akahu Transfer Rules` field and current Manager bank/cash account custom-field values at sync start, rebuilds linked-account transfer rules from the current Manager account batch, and includes refreshed rule warnings in account sync summaries.
+- Completed: Settled transactions now match valid transfer rules against raw Akahu descriptions before receipt/payment classification, classify settled inter-account transfer payloads through the manager-api helper, run transfer duplicate and mirror-candidate decisions, create Manager inter-account transfers with `POST/api4/inter-account-transfer`, record processed transfer FDX IDs, and update `transferRulesMatched`/`transfersCreated` counts.
+- Completed: Matched settled transfer transactions skip with warnings/counts for previous receipt/payment imports, ambiguous FDX duplicates, invalid/unsupported transfer data, and foreign-currency destination accounts; existing Manager transfer duplicates and safe mirror candidates skip creation without falling through to receipt/payment imports.
+- Discovery: Syntax-valid transfer rules with unknown or self-target destinations are invalidated during sync-start refresh. The sync flow also keeps those invalid rule keywords as matchers so settled transactions that appear intended as transfers are skipped with the refreshed rule warning instead of being imported as ordinary receipts/payments.
+- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
 ### Task 7: Wire Settled Mirror Merge And Pending Replacement
 
