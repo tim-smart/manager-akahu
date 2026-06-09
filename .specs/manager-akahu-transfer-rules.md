@@ -320,6 +320,15 @@ Status: Completed.
 - Completed: Added inter-account transfer clearance field constants in `packages/manager-api/src/ManagerCompatibility.ts` so transfer payload helpers reuse the same Manager `onSameDate`/`onLaterDate` status values as receipt/payment imports.
 - Validation: `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerCompatibility.test.ts"`, and `pnpm --filter @app/manager-api build`; all passed.
 
+### Task 4 Review: Transfer Payload Helper Code Quality Follow-Up
+
+Status: Pending.
+
+- Replace the manager-api-local `ManagerAkahuTransferRuleInput` shape and transfer-rule matching implementation with the canonical domain transfer-rule model/helpers. `@app/manager-api` already depends on `@app/domain`, and later sync wiring will pass `LinkedAccount.transferRules`, so duplicating `LinkedAccountTransferRule` plus the normalize/substring match semantics creates avoidable drift at the package boundary. Prefer accepting `LinkedAccountTransferRule` or a narrow `Pick<LinkedAccountTransferRule, ...>` and reusing `matchesAkahuTransferRuleDescription` / `normalizeAkahuTransferRuleText` instead of maintaining a second rule contract.
+- Make transfer-rule overlap decisions structural instead of formatting a per-transaction warning inside `matchManagerAkahuTransferRule`. The spec requires overlapping-rule warnings to be aggregated per source account and ignored-rule combination per sync run; returning an optional warning string from the pure match helper and testing that exact text nudges later wiring toward warning spam. Return the selected rule, ignored rules, and a stable aggregation key or structured overlap event, then format/deduplicate warnings in the sync orchestration layer.
+- Make transfer-specific pending fingerprints delimiter-safe before wiring pending transfer sync. The current `:`-joined fingerprint includes variable description and keyword text that may also contain `:`, so distinct component tuples can collapse to the same FDX ID. Encode each component or serialize/hash a stable tuple, and add a regression test that proves descriptions/keywords containing separators cannot collide.
+- After the refactor, rerun `pnpm test "packages/manager-api/tests/ManagerAkahuTransactionSync.test.ts"`, `pnpm test "packages/manager-api/tests/ManagerCompatibility.test.ts"`, `pnpm test "packages/domain/tests/ManagerAkahuTransferRules.test.ts"`, and `pnpm --filter @app/manager-api build`.
+
 ### Task 5: Add Pure Transfer Duplicate, Merge, Stale, And Count Metadata
 
 - Add pure duplicate decisions for transfer FDX entries in the common sync-read index.
