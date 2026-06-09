@@ -400,6 +400,14 @@ Status: In Progress.
 - Remaining: settled-to-pending transfer replacement is not implemented in this step and still needs focused coverage.
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
+### Task 7 Review: Settled Mirror Merge Code Quality Follow-Up
+
+Status: Pending.
+
+- Structural issue: `apps/website/src/Manager/SyncFlows.ts` now treats both no-current-FDX mirrored candidates and duplicate-index `mirrorCandidate` entries as the same merge write. The duplicate-index branch can occur when the current Akahu FDX ID is already present on the opposite transfer side, and the preserving update would then write that same FDX ID onto the missing current side as well. Tighten the pure decision contract before extending pending replacement: either classify an opposite-side current-FDX hit as a duplicate/ambiguous skip, or introduce an explicit repair decision that moves or clears the wrong-side value instead of duplicating it across both transfer FDX fields. Add website coverage for this branch so the orchestration cannot silently merge an already-imported current FDX ID.
+- Boundary issue: `buildManagerAkahuSettledMirroredTransferUpdatePayload` lives in website orchestration and manually knows the credit/debit FDX and clear-status field mapping. Move this payload construction to the manager-api transfer helper boundary, next to the transfer payload, duplicate, and mirrored-candidate helpers, with a strict local PUT payload type requiring `key` and `value` instead of deriving the loose generated `PutInterAccountTransfer` parameter where both are optional. Add pure tests that field preservation updates only the intended side.
+- Simplification opportunity: settled transfer write orchestration now composes duplicate detection and mirrored-candidate selection in nested website switches, producing two merge paths plus create/duplicate/warning paths. Collapse this into one pure settled transfer write decision such as `create | merge | duplicateSkip | warningSkip`, carrying the Manager write payload where applicable. The website flow should increment match counts, execute the selected write, and update state, while manager-api owns the transfer-specific branching; this will also give Task 8 pending replacement a cleaner extension point instead of adding another special-case branch in `SyncFlows.ts`.
+
 ### Task 8: Wire Pending Transfer Sync And Stale Detection
 
 - In pending processing, check transfer rules before receipt/payment pending fingerprint/classification.
