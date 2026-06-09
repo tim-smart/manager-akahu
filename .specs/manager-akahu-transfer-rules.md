@@ -416,11 +416,18 @@ Status: Completed.
 
 ### Task 8: Wire Pending Transfer Sync And Stale Detection
 
+Status: Completed.
+
 - In pending processing, check transfer rules before receipt/payment pending fingerprint/classification.
 - For pending rule matches, use transfer-specific pending fingerprints and create/update Manager inter-account transfers.
 - Track current pending transfer fingerprints and include them in stale pending transfer detection after successful pending endpoint reads.
 - Add tests for pending transfer create, exact pending update, same-run duplicate suppression, unsupported destination pending capability skip, stale pending transfer warning, and pending transfer summary counts.
 - Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build`.
+- Completed: Pending transaction sync now evaluates transfer rules before ordinary receipt/payment pending fingerprints. Valid pending transfer matches use `akahu-transfer-pending:v1:` fingerprints, bypass ordinary pending receipt/payment import, and create Manager inter-account transfers with pending clear statuses.
+- Completed: Exact pending transfer fingerprint matches update the existing Manager inter-account transfer with the canonical pending transfer payload and increment both transfer-specific and aggregate pending update counts. Same-run pending transfer fingerprints are recorded after successful writes so duplicate Akahu pending rows are suppressed in the same sync run.
+- Completed: Pending transfer matches with unsupported destination pending capability are skipped with a warning and do not fall through to ordinary receipt/payment import.
+- Completed: Pending endpoint success now tracks current transfer pending fingerprints separately from receipt/payment fingerprints and reports stale pending inter-account transfers with both `stalePendingTransfersDetected` and aggregate `stalePendingDetected` counts.
+- Validation: `pnpm test "apps/website/tests/ManagerSyncFlows.test.ts"` and `pnpm --filter website build` passed.
 
 ## Open Questions
 

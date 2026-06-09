@@ -362,6 +362,229 @@ it.effect("does not report fingerprinted zero-amount pending rows as stale", () 
   }),
 )
 
+it.effect("creates pending inter-account transfers for matching transfer rules", () =>
+  Effect.gen(function* () {
+    const pendingFdxTransactionId =
+      "akahu-transfer-pending:v1:akahu-checking:manager-checking:manager-savings:2026-06-05:-25.01:transfer%20to%20savings:transfer%20to%20savings"
+    const { client, interAccountTransferPayloads, paymentPayloads, receiptPayloads } =
+      makeMockClient({
+        receipts: [],
+        managerAccounts: makeDefaultManagerAccounts("Transfer to savings, manager-savings"),
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: () =>
+        Stream.fromIterable([makePendingTransaction("Transfer to savings", "-25.01")]),
+    })
+
+    expect(receiptPayloads).toEqual([])
+    expect(paymentPayloads).toEqual([])
+    expect(interAccountTransferPayloads).toEqual([
+      {
+        value: {
+          date: "2026-06-05",
+          description: "Transfer to savings",
+          paidFrom: bankOrCashAccountKey,
+          receivedIn: destinationBankOrCashAccountKey,
+          creditAmount: "25.01",
+          debitAmount: "25.01",
+          creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+          fdxCreditTransactionId: pendingFdxTransactionId,
+        },
+      },
+    ])
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 1,
+      transferRulesMatched: 1,
+      transfersCreated: 1,
+      pendingCreated: 1,
+      receiptsCreated: 0,
+      paymentsCreated: 0,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("exact-updates existing pending inter-account transfers by transfer fingerprint", () =>
+  Effect.gen(function* () {
+    const pendingFdxTransactionId =
+      "akahu-transfer-pending:v1:akahu-checking:manager-checking:manager-savings:2026-06-05:-25.01:transfer%20to%20savings:transfer%20to%20savings"
+    const existingTransfer = makeManagerInterAccountTransfer("existing-pending-transfer-exact", {
+      date: "2026-06-04",
+      description: "Old pending transfer description",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: destinationBankOrCashAccountKey,
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      fdxCreditTransactionId: pendingFdxTransactionId,
+    })
+    const { client, interAccountTransferPayloads, interAccountTransferPutPayloads } =
+      makeMockClient({
+        receipts: [],
+        interAccountTransfers: [existingTransfer],
+        managerAccounts: makeDefaultManagerAccounts("Transfer to savings, manager-savings"),
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: () =>
+        Stream.fromIterable([makePendingTransaction("Transfer to savings", "-25.01")]),
+    })
+
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(interAccountTransferPutPayloads).toEqual([
+      {
+        key: "existing-pending-transfer-exact",
+        value: {
+          date: "2026-06-05",
+          description: "Transfer to savings",
+          paidFrom: bankOrCashAccountKey,
+          receivedIn: destinationBankOrCashAccountKey,
+          creditAmount: "25.01",
+          debitAmount: "25.01",
+          creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+          fdxCreditTransactionId: pendingFdxTransactionId,
+        },
+      },
+    ])
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 1,
+      transferRulesMatched: 1,
+      transfersCreated: 0,
+      transfersUpdated: 1,
+      pendingUpdated: 1,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("suppresses same-run duplicate pending transfer fingerprints", () =>
+  Effect.gen(function* () {
+    const { client, interAccountTransferPayloads } = makeMockClient({
+      receipts: [],
+      managerAccounts: makeDefaultManagerAccounts("Transfer to savings, manager-savings"),
+    })
+    const pendingTransfer = makePendingTransaction("Transfer to savings", "-25.01")
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: () => Stream.fromIterable([pendingTransfer, pendingTransfer]),
+    })
+
+    expect(interAccountTransferPayloads).toHaveLength(1)
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 2,
+      transferRulesMatched: 2,
+      transfersCreated: 1,
+      pendingCreated: 1,
+      duplicatesSkipped: 1,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("skips pending transfers when the destination cannot have pending transactions", () =>
+  Effect.gen(function* () {
+    const { client, interAccountTransferPayloads, paymentPayloads, receiptPayloads } =
+      makeMockClient({
+        receipts: [],
+        managerAccounts: [
+          makeManagerBankOrCashAccount({
+            key: bankOrCashAccountKey,
+            name: "Manager Checking",
+            transferRules: "Transfer to savings, manager-savings",
+          }),
+          makeManagerBankOrCashAccount({
+            key: destinationBankOrCashAccountKey,
+            name: "Manager Savings",
+            canHavePendingTransactions: false,
+          }),
+        ],
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: () =>
+        Stream.fromIterable([makePendingTransaction("Transfer to savings", "-25.01")]),
+    })
+
+    expect(receiptPayloads).toEqual([])
+    expect(paymentPayloads).toEqual([])
+    expect(interAccountTransferPayloads).toEqual([])
+    expect(summary.accounts[0]?.warnings).toEqual([
+      "Skipping pending transfer to Manager Savings: Manager account does not support pending transactions.",
+    ])
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 1,
+      transferRulesMatched: 1,
+      transfersCreated: 0,
+      unsupportedSkipped: 1,
+      warnings: 1,
+      errors: 0,
+    })
+  }),
+)
+
+it.effect("reports stale pending inter-account transfer fingerprints after pending reads", () =>
+  Effect.gen(function* () {
+    const stalePendingFdxTransactionId =
+      "akahu-transfer-pending:v1:akahu-checking:manager-checking:manager-savings:2026-06-04:-25.01:transfer%20to%20savings:transfer%20to%20savings"
+    const existingTransfer = makeManagerInterAccountTransfer("stale-pending-transfer", {
+      date: "2026-06-04",
+      description: "Transfer to savings",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: destinationBankOrCashAccountKey,
+      creditAmount: "25.01",
+      debitAmount: "25.01",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      fdxCreditTransactionId: stalePendingFdxTransactionId,
+    })
+    const { client } = makeMockClient({
+      receipts: [],
+      interAccountTransfers: [existingTransfer],
+    })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(summary.accounts[0]?.warnings).toEqual([
+      `Stale Akahu pending Manager inter-account transfer stale-pending-transfer (${stalePendingFdxTransactionId}) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.`,
+    ])
+    expect(summary.overall).toMatchObject({
+      stalePendingDetected: 1,
+      stalePendingTransfersDetected: 1,
+      warnings: 1,
+      errors: 0,
+    })
+  }),
+)
+
 it.effect("skips unsupported foreign-currency accounts with one account warning", () =>
   Effect.gen(function* () {
     const {

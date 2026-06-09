@@ -11,6 +11,7 @@ import {
 import type { AccountId, PendingTransaction, Transaction } from "@app/domain/Akahu"
 import {
   addManagerAkahuSyncSummaryCounts,
+  buildAkahuPendingTransferFingerprint,
   buildAkahuPendingTransactionFingerprint,
   buildManagerAkahuSettledMirroredTransferUpdatePayload,
   classifyManagerAkahuInterAccountTransfer,
@@ -20,6 +21,7 @@ import {
   decidePendingToSettledMatch,
   decideSettledDuplicateByAkahuTransactionId,
   decideStalePendingEntries,
+  decideStalePendingTransferEntries,
   decideTransferDuplicateByFdxTransactionId,
   emptyManagerAkahuSyncSummaryCounts,
   incrementManagerAkahuSyncSummaryCount,
@@ -524,6 +526,7 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
   let state = input.state
   let failed = false
   const currentPendingFdxTransactionIds = new Set<string>()
+  const currentPendingTransferFdxTransactionIds = new Set<string>()
 
   yield* input.input
     .fetchPendingTransactions({
@@ -534,20 +537,12 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
     .pipe(
       Stream.runForEach((transaction) =>
         Effect.gen(function* () {
-          const fingerprintDecision = buildAkahuPendingTransactionFingerprint({
-            akahuAccountId: input.context.account.akahuAccount._id,
-            date: transaction.date,
-            amount: transaction.amount,
-            description: transaction.description,
-          })
-          if (fingerprintDecision._tag === "fingerprint") {
-            currentPendingFdxTransactionIds.add(fingerprintDecision.fingerprint)
-          }
           state = yield* processManagerAkahuPendingTransaction({
             context: input.context,
             state,
             transaction,
-            fingerprintDecision,
+            currentPendingFdxTransactionIds,
+            currentPendingTransferFdxTransactionIds,
           })
         }),
       ),
@@ -563,6 +558,7 @@ const syncManagerAkahuPendingTransactionPhase = Effect.fn(
       state,
       syncRead: input.context.syncRead,
       currentPendingFdxTransactionIds,
+      currentPendingTransferFdxTransactionIds,
     })
   }
 
@@ -605,8 +601,12 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
         )
         state = { ...state, accountState }
 
-        if (intent.match.overlapMatch) {
-          state = addManagerAkahuTransferRuleOverlapWarning(state, intent.match.overlapMatch)
+        state = {
+          ...state,
+          accountState: addManagerAkahuTransferRuleOverlapWarning(
+            state.accountState,
+            intent.match.overlapMatch,
+          ),
         }
 
         if (state.accountState.processedFdxTransactionIds.has(transaction._id)) {
@@ -916,6 +916,7 @@ const createManagerAkahuTransfer = Effect.fn("createManagerAkahuTransfer")(funct
   readonly client: ManagerAkahuTransactionSyncManagerClient
   readonly fdxTransactionId: string
   readonly classification: ManagerAkahuTransferCreateClassification
+  readonly successCounts?: ReadonlyArray<keyof ManagerAkahuSyncSummaryCounts> | undefined
 }) {
   const writeResult = yield* input.client["POST/api4/inter-account-transfer"](
     input.classification.payload,
@@ -932,9 +933,38 @@ const createManagerAkahuTransfer = Effect.fn("createManagerAkahuTransfer")(funct
 
   return addManagerAkahuTransactionSyncAccountSuccessfulWrite(input.state, {
     processedFdxTransactionIds: [input.fdxTransactionId],
-    successCounts: ["transfersCreated"],
+    successCounts: ["transfersCreated", ...(input.successCounts ?? [])],
   })
 })
+
+const updateManagerAkahuPendingTransfer = Effect.fn("updateManagerAkahuPendingTransfer")(
+  function* (input: {
+    readonly state: ManagerAkahuTransactionSyncAccountState
+    readonly client: ManagerAkahuTransactionSyncManagerClient
+    readonly fdxTransactionId: string
+    readonly classification: ManagerAkahuTransferCreateClassification
+    readonly entry: ManagerBankOrCashAccountSyncRead["existingTransferFdxTransactionIdEntries"][number]
+  }) {
+    const writeResult = yield* input.client["PUT/api4/inter-account-transfer"]({
+      key: input.entry.key,
+      value: input.classification.payload.value,
+    }).pipe(
+      Effect.as({ _tag: "updated" as const }),
+      Effect.catch((error) =>
+        Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+      ),
+    )
+
+    if (writeResult._tag === "error") {
+      return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
+    }
+
+    return addManagerAkahuTransactionSyncAccountSuccessfulWrite(input.state, {
+      processedFdxTransactionIds: [input.fdxTransactionId],
+      successCounts: ["transfersUpdated", "pendingUpdated"],
+    })
+  },
+)
 
 const updateManagerAkahuSettledPendingTransfer = Effect.fn(
   "updateManagerAkahuSettledPendingTransfer",
@@ -1006,13 +1036,88 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     readonly context: ManagerAkahuTransactionSyncAccountContext
     readonly state: ManagerAkahuTransactionSyncAccountState
     readonly transaction: PendingTransaction
-    readonly fingerprintDecision: ReturnType<typeof buildAkahuPendingTransactionFingerprint>
+    readonly currentPendingFdxTransactionIds: Set<string>
+    readonly currentPendingTransferFdxTransactionIds: Set<string>
   }): Effect.fn.Return<ManagerAkahuTransactionSyncAccountState> {
     const { account, client, syncRead } = input.context
     const transaction = input.transaction
     const description = transaction.description
     let state = incrementManagerAkahuTransactionSyncAccountCount(input.state, "pendingFetched")
-    const fingerprintDecision = input.fingerprintDecision
+
+    const transferRuleMatch = matchManagerAkahuTransferRule({
+      rules: account.transferRules,
+      description,
+    })
+
+    if (transferRuleMatch._tag === "match") {
+      state = incrementManagerAkahuTransactionSyncAccountCount(state, "transferRulesMatched")
+      state = addManagerAkahuTransferRuleOverlapWarning(state, transferRuleMatch.overlapMatch)
+
+      const fingerprintDecision = buildAkahuPendingTransferFingerprint({
+        akahuAccountId: account.akahuAccount._id,
+        date: transaction.date,
+        amount: transaction.amount,
+        description,
+        rule: transferRuleMatch.rule,
+      })
+
+      if (fingerprintDecision._tag === "unsupported") {
+        state = addManagerAkahuTransactionSyncAccountWarning(state, fingerprintDecision.warning)
+        state = incrementManagerAkahuTransactionSyncAccountCount(state, "unsupportedSkipped")
+        return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+      }
+
+      input.currentPendingTransferFdxTransactionIds.add(fingerprintDecision.fingerprint)
+
+      if (state.processedFdxTransactionIds.has(fingerprintDecision.fingerprint)) {
+        return incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
+      }
+
+      const classification = classifyManagerAkahuInterAccountTransfer({
+        rule: transferRuleMatch.rule,
+        date: transaction.date,
+        signedAmount: transaction.amount,
+        description,
+        fdxTransactionId: fingerprintDecision.fingerprint,
+        clearance: { _tag: "pending" },
+      })
+
+      switch (classification._tag) {
+        case "transfer":
+          return yield* processManagerAkahuPendingTransferTransaction({
+            state,
+            client,
+            syncRead,
+            fdxTransactionId: fingerprintDecision.fingerprint,
+            classification,
+          })
+        case "zero":
+          return incrementManagerAkahuTransactionSyncAccountCount(state, "zeroAmountSkipped")
+        case "unsupported":
+          state = addManagerAkahuTransactionSyncAccountWarning(state, classification.warning)
+          state = incrementManagerAkahuTransactionSyncAccountCount(state, "unsupportedSkipped")
+          return incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+      }
+    }
+
+    if (
+      input.context.invalidTransferRuleMatchers.some((matcher) =>
+        matchesAkahuTransferRuleDescription(matcher.rule, description),
+      )
+    ) {
+      return incrementManagerAkahuTransactionSyncAccountCount(state, "unsupportedSkipped")
+    }
+
+    const fingerprintDecision = buildAkahuPendingTransactionFingerprint({
+      akahuAccountId: account.akahuAccount._id,
+      date: transaction.date,
+      amount: transaction.amount,
+      description,
+    })
+
+    if (fingerprintDecision._tag === "fingerprint") {
+      input.currentPendingFdxTransactionIds.add(fingerprintDecision.fingerprint)
+    }
 
     if (fingerprintDecision._tag === "unsupported") {
       state = addManagerAkahuTransactionSyncAccountWarning(state, fingerprintDecision.warning)
@@ -1074,6 +1179,49 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
     }
   },
 )
+
+const processManagerAkahuPendingTransferTransaction = Effect.fn(
+  "processManagerAkahuPendingTransferTransaction",
+)(function* (input: {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly client: ManagerAkahuTransactionSyncManagerClient
+  readonly syncRead: ManagerBankOrCashAccountSyncRead
+  readonly fdxTransactionId: string
+  readonly classification: ManagerAkahuTransferCreateClassification
+}) {
+  const duplicateDecision = decideTransferDuplicateByFdxTransactionId({
+    syncRead: input.syncRead,
+    fdxTransactionId: input.fdxTransactionId,
+    sourceTransferSide: input.classification.sourceTransferSide,
+    payload: input.classification.payload,
+  })
+
+  switch (duplicateDecision._tag) {
+    case "create":
+      return yield* createManagerAkahuTransfer({
+        state: input.state,
+        client: input.client,
+        fdxTransactionId: input.fdxTransactionId,
+        classification: input.classification,
+        successCounts: ["pendingCreated"],
+      })
+    case "duplicate":
+      return yield* updateManagerAkahuPendingTransfer({
+        state: input.state,
+        client: input.client,
+        fdxTransactionId: input.fdxTransactionId,
+        classification: input.classification,
+        entry: duplicateDecision.entries[0],
+      })
+    case "previouslyImportedAsSuspense":
+    case "ambiguous":
+      return addManagerAkahuTransactionSyncAccountWarningSkip(
+        input.state,
+        duplicateDecision.warning,
+        "duplicatesSkipped",
+      )
+  }
+})
 
 const updateManagerAkahuAccountStateFromClassifiedUpdate = Effect.fn(
   "updateManagerAkahuAccountStateFromClassifiedUpdate",
@@ -1225,30 +1373,31 @@ const addManagerAkahuTransactionSyncAccountSuccessfulWrite = (
 }
 
 const addManagerAkahuTransferRuleOverlapWarning = (
-  state: ManagerAkahuSettledPhaseState,
-  overlapMatch: ManagerAkahuTransferRuleOverlapMatch,
-): ManagerAkahuSettledPhaseState => {
-  if (state.accountState.transferRuleOverlapAggregationKeys.has(overlapMatch.aggregationKey)) {
+  state: ManagerAkahuTransactionSyncAccountState,
+  overlapMatch: ManagerAkahuTransferRuleOverlapMatch | undefined,
+): ManagerAkahuTransactionSyncAccountState => {
+  if (!overlapMatch || state.transferRuleOverlapAggregationKeys.has(overlapMatch.aggregationKey)) {
     return state
   }
 
   let accountState = addManagerAkahuTransactionSyncAccountWarning(
     {
-      ...state.accountState,
-      transferRuleOverlapAggregationKeys: new Set(
-        state.accountState.transferRuleOverlapAggregationKeys,
-      ).add(overlapMatch.aggregationKey),
+      ...state,
+      transferRuleOverlapAggregationKeys: new Set(state.transferRuleOverlapAggregationKeys).add(
+        overlapMatch.aggregationKey,
+      ),
     },
     `Transfer rule "${overlapMatch.selectedRule.keyword}" matched; ignored ${overlapMatch.ignoredRules.length} later matching transfer rule(s).`,
   )
   accountState = incrementManagerAkahuTransactionSyncAccountCount(accountState, "warnings")
-  return { ...state, accountState }
+  return accountState
 }
 
 const detectManagerAkahuStalePendingEntries = (input: {
   readonly state: ManagerAkahuTransactionSyncAccountState
   readonly syncRead: ManagerBankOrCashAccountSyncRead
   readonly currentPendingFdxTransactionIds: ReadonlySet<string>
+  readonly currentPendingTransferFdxTransactionIds: ReadonlySet<string>
 }): ManagerAkahuTransactionSyncAccountState => {
   let state = input.state
 
@@ -1262,6 +1411,20 @@ const detectManagerAkahuStalePendingEntries = (input: {
       `Stale Akahu pending Manager ${entry._tag} ${entry.key} (${entry.fdxTransactionId}) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.`,
     )
     state = incrementManagerAkahuTransactionSyncAccountCount(state, "stalePendingDetected")
+    state = incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
+  }
+
+  for (const entry of decideStalePendingTransferEntries({
+    syncRead: input.syncRead,
+    currentPendingFdxTransactionIds: input.currentPendingTransferFdxTransactionIds,
+    processedFdxTransactionIds: state.processedFdxTransactionIds,
+  })) {
+    state = addManagerAkahuTransactionSyncAccountWarning(
+      state,
+      `Stale Akahu pending Manager inter-account transfer ${entry.key} (${entry.fdxTransactionId}) was not returned by Akahu pending transactions and was not replaced by a settled transaction; leaving it unchanged.`,
+    )
+    state = incrementManagerAkahuTransactionSyncAccountCount(state, "stalePendingDetected")
+    state = incrementManagerAkahuTransactionSyncAccountCount(state, "stalePendingTransfersDetected")
     state = incrementManagerAkahuTransactionSyncAccountCount(state, "warnings")
   }
 
