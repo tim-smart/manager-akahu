@@ -251,10 +251,8 @@ export type ManagerAkahuMirroredTransferCandidateDecision =
 export interface ManagerAkahuSuspenseTransferDuplicateCandidateInput {
   readonly syncRead: Pick<ManagerBankOrCashAccountSyncRead, "interAccountTransfers">
   readonly bankOrCashAccountKey: string
-  readonly settledKind: ManagerAkahuTransactionKind
   readonly settledDate: DateTime.DateTime
   readonly absoluteNormalizedAmount: ManagerLineAmount
-  readonly settledDescription: string
 }
 
 export type ManagerAkahuSuspenseTransferDuplicateCandidateDecision =
@@ -801,16 +799,6 @@ export const isManagerAkahuMirroredTransferCandidate = (input: {
   )
 }
 
-const getSuspenseTransferDuplicateSide = (
-  settledKind: ManagerAkahuTransactionKind,
-): ManagerExistingFdxTransactionIdTransferSide => (settledKind === "receipt" ? "debit" : "credit")
-
-const getTransferAccountKeyForSide = (
-  transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
-  side: ManagerExistingFdxTransactionIdTransferSide,
-): string | null | undefined =>
-  side === "credit" ? transfer.item.paidFrom : transfer.item.receivedIn
-
 const getTransferAmountForSide = (
   transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
   side: ManagerExistingFdxTransactionIdTransferSide,
@@ -819,35 +807,32 @@ const getTransferAmountForSide = (
     side === "credit" ? transfer.item.creditAmount : transfer.item.debitAmount,
   )
 
-const hasAnyTransferFdxTransactionId = (
+const isTransferAccountSideMatch = (
   transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
+  bankOrCashAccountKey: string,
 ): boolean =>
-  !isBlankManagerTransferFdxTransactionId(transfer.item.fdxCreditTransactionId) ||
-  !isBlankManagerTransferFdxTransactionId(transfer.item.fdxDebitTransactionId)
+  transfer.item.paidFrom === bankOrCashAccountKey ||
+  transfer.item.receivedIn === bankOrCashAccountKey
+
+const isTransferAmountMatch = (
+  transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
+  absoluteNormalizedAmount: ManagerLineAmount,
+): boolean =>
+  getTransferAmountForSide(transfer, "credit") === absoluteNormalizedAmount ||
+  getTransferAmountForSide(transfer, "debit") === absoluteNormalizedAmount
 
 export const selectManagerAkahuSuspenseTransferDuplicateCandidate = (
   input: ManagerAkahuSuspenseTransferDuplicateCandidateInput,
 ): ManagerAkahuSuspenseTransferDuplicateCandidateDecision => {
-  const transferSide = getSuspenseTransferDuplicateSide(input.settledKind)
   const settledDate = DateTime.formatIsoDate(input.settledDate)
-  const settledDescription = normalizeAkahuTransactionDescription(input.settledDescription)
   const candidates = input.syncRead.interAccountTransfers.filter((transfer) => {
-    if (getTransferAccountKeyForSide(transfer, transferSide) !== input.bankOrCashAccountKey) {
+    if (!isTransferAccountSideMatch(transfer, input.bankOrCashAccountKey)) {
       return false
     }
     if (transfer.item.date !== settledDate) {
       return false
     }
-    if (getTransferAmountForSide(transfer, transferSide) !== input.absoluteNormalizedAmount) {
-      return false
-    }
-    if (hasAnyTransferFdxTransactionId(transfer)) {
-      return true
-    }
-
-    return (
-      normalizeAkahuTransactionDescription(transfer.item.description ?? "") === settledDescription
-    )
+    return isTransferAmountMatch(transfer, input.absoluteNormalizedAmount)
   })
 
   if (candidates.length === 0) {

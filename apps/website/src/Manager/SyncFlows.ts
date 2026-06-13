@@ -749,10 +749,8 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
           const transferDuplicateDecision = selectManagerAkahuSuspenseTransferDuplicateCandidate({
             syncRead,
             bankOrCashAccountKey: input.context.account.key,
-            settledKind: intent.classification._tag,
             settledDate: transaction.date,
             absoluteNormalizedAmount: intent.classification.absoluteNormalizedAmount,
-            settledDescription: getAkahuTransactionDescription(transaction),
           })
 
           if (transferDuplicateDecision._tag === "candidate") {
