@@ -254,6 +254,7 @@ export interface ManagerAkahuSuspenseTransferDuplicateCandidateInput {
   readonly settledKind: ManagerAkahuTransactionKind
   readonly settledDate: DateTime.DateTime
   readonly absoluteNormalizedAmount: ManagerLineAmount
+  readonly settledDescription: string
 }
 
 export type ManagerAkahuSuspenseTransferDuplicateCandidateDecision =
@@ -818,12 +819,18 @@ const getTransferAmountForSide = (
     side === "credit" ? transfer.item.creditAmount : transfer.item.debitAmount,
   )
 
+const hasAnyTransferFdxTransactionId = (
+  transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
+): boolean =>
+  !isBlankManagerTransferFdxTransactionId(transfer.item.fdxCreditTransactionId) ||
+  !isBlankManagerTransferFdxTransactionId(transfer.item.fdxDebitTransactionId)
+
 export const selectManagerAkahuSuspenseTransferDuplicateCandidate = (
   input: ManagerAkahuSuspenseTransferDuplicateCandidateInput,
 ): ManagerAkahuSuspenseTransferDuplicateCandidateDecision => {
   const transferSide = getSuspenseTransferDuplicateSide(input.settledKind)
   const settledDate = DateTime.formatIsoDate(input.settledDate)
-  const oppositeTransferSide = getOppositeTransferSide(transferSide)
+  const settledDescription = normalizeAkahuTransactionDescription(input.settledDescription)
   const candidates = input.syncRead.interAccountTransfers.filter((transfer) => {
     if (getTransferAccountKeyForSide(transfer, transferSide) !== input.bankOrCashAccountKey) {
       return false
@@ -834,16 +841,12 @@ export const selectManagerAkahuSuspenseTransferDuplicateCandidate = (
     if (getTransferAmountForSide(transfer, transferSide) !== input.absoluteNormalizedAmount) {
       return false
     }
-    if (
-      !isBlankManagerTransferFdxTransactionId(
-        getTransferSideFdxTransactionId(transfer, transferSide),
-      )
-    ) {
-      return false
+    if (hasAnyTransferFdxTransactionId(transfer)) {
+      return true
     }
 
-    return !isBlankManagerTransferFdxTransactionId(
-      getTransferSideFdxTransactionId(transfer, oppositeTransferSide),
+    return (
+      normalizeAkahuTransactionDescription(transfer.item.description ?? "") === settledDescription
     )
   })
 

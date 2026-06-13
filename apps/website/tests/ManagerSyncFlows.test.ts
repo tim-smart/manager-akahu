@@ -580,6 +580,70 @@ it.effect("settles a pending receipt endpoint recategorized as a Manager transfe
   }),
 )
 
+it.effect(
+  "skips settled receipt and payment imports recategorized as Manager transfers without FDX IDs",
+  () =>
+    Effect.gen(function* () {
+      const recategorizedReceiptTransfer = makeManagerInterAccountTransfer(
+        "recategorized-receipt-transfer-no-fdx",
+        {
+          date: "2026-06-05",
+          description: "Coffee Shop",
+          paidFrom: destinationBankOrCashAccountKey,
+          receivedIn: bankOrCashAccountKey,
+          creditAmount: "12.34",
+          debitAmount: "12.34",
+          creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+        },
+      )
+      const recategorizedPaymentTransfer = makeManagerInterAccountTransfer(
+        "recategorized-payment-transfer-no-fdx",
+        {
+          date: "2026-06-05",
+          description: "Shop",
+          paidFrom: bankOrCashAccountKey,
+          receivedIn: destinationBankOrCashAccountKey,
+          creditAmount: "9.99",
+          debitAmount: "9.99",
+          creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+        },
+      )
+      const { client, interAccountTransferPutPayloads, paymentPayloads, receiptPayloads } =
+        makeMockClient({
+          receipts: [],
+          interAccountTransfers: [recategorizedReceiptTransfer, recategorizedPaymentTransfer],
+        })
+
+      const summary = yield* syncManagerAkahuTransactions({
+        accounts: [linkedAccount],
+        client,
+        tokens,
+        fetchSettledTransactions: () =>
+          Stream.fromIterable([
+            makeSettledTransaction("settled-recategorized-receipt-no-fdx", "12.34", "Coffee Shop"),
+            makeSettledTransaction("settled-recategorized-payment-no-fdx", "-9.99", "Shop"),
+          ]),
+        fetchPendingTransactions: () => Stream.empty,
+      })
+
+      expect(receiptPayloads).toEqual([])
+      expect(paymentPayloads).toEqual([])
+      expect(interAccountTransferPutPayloads).toEqual([])
+      expect(summary.accounts[0]?.warnings).toEqual([])
+      expect(summary.overall).toMatchObject({
+        settledFetched: 2,
+        receiptsCreated: 0,
+        paymentsCreated: 0,
+        transfersUpdated: 0,
+        duplicatesSkipped: 2,
+        warnings: 0,
+        errors: 0,
+      })
+    }),
+)
+
 it.effect("creates pending inter-account transfers for matching transfer rules", () =>
   Effect.gen(function* () {
     const pendingFdxTransactionId =

@@ -704,29 +704,6 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
       case "receipt":
       case "payment":
         {
-          const transferDuplicateDecision = selectManagerAkahuSuspenseTransferDuplicateCandidate({
-            syncRead,
-            bankOrCashAccountKey: input.context.account.key,
-            settledKind: intent.classification._tag,
-            settledDate: transaction.date,
-            absoluteNormalizedAmount: intent.classification.absoluteNormalizedAmount,
-          })
-
-          if (transferDuplicateDecision._tag === "candidate") {
-            return skipManagerAkahuSettledPhaseDuplicateOverlap({
-              state,
-              fdxTransactionId: transaction._id,
-            })
-          }
-
-          if (transferDuplicateDecision._tag === "ambiguous") {
-            return skipManagerAkahuSettledPhaseDuplicateOverlap({
-              state,
-              fdxTransactionId: transaction._id,
-              warning: transferDuplicateDecision.warning,
-            })
-          }
-
           const pendingReplacementDecision = decidePendingToSettledMatch({
             syncRead,
             settledDate: transaction.date,
@@ -767,6 +744,30 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
               "warnings",
             )
             state = { ...state, accountState }
+          }
+
+          const transferDuplicateDecision = selectManagerAkahuSuspenseTransferDuplicateCandidate({
+            syncRead,
+            bankOrCashAccountKey: input.context.account.key,
+            settledKind: intent.classification._tag,
+            settledDate: transaction.date,
+            absoluteNormalizedAmount: intent.classification.absoluteNormalizedAmount,
+            settledDescription: getAkahuTransactionDescription(transaction),
+          })
+
+          if (transferDuplicateDecision._tag === "candidate") {
+            return skipManagerAkahuSettledPhaseDuplicateOverlap({
+              state,
+              fdxTransactionId: transaction._id,
+            })
+          }
+
+          if (transferDuplicateDecision._tag === "ambiguous") {
+            return skipManagerAkahuSettledPhaseDuplicateOverlap({
+              state,
+              fdxTransactionId: transaction._id,
+              warning: transferDuplicateDecision.warning,
+            })
           }
         }
 

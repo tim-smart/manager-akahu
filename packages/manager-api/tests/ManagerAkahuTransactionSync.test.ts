@@ -830,30 +830,32 @@ test("selects unique mirrored transfer candidates and reports ambiguous candidat
 test("selects receipt-side settled suspense duplicates from existing transfers", () => {
   const matching = interAccountTransferItem("transfer-receipt-duplicate", {
     date: "2026-06-04",
+    description: "Coffee Shop",
     paidFrom: "bank-2",
     receivedIn: bankOrCashAccountKey,
     creditAmount: "12.34",
     debitAmount: "12.340",
-    fdxCreditTransactionId: "opposite-transfer-fdx",
+    fdxCreditTransactionId: null,
     fdxDebitTransactionId: null,
   })
-  const currentSideAlreadyImported = interAccountTransferItem("transfer-current-side", {
+  const differentDescription = interAccountTransferItem("transfer-different-description", {
     ...matching.item,
-    fdxDebitTransactionId: "existing-current-side-fdx",
+    description: "Different Shop",
   })
-  const missingOppositeSideFdx = interAccountTransferItem("transfer-no-opposite-fdx", {
+  const differentAmount = interAccountTransferItem("transfer-different-amount", {
     ...matching.item,
-    fdxCreditTransactionId: null,
+    debitAmount: "12.35",
   })
 
   const decision = selectManagerAkahuSuspenseTransferDuplicateCandidate({
     syncRead: managerSyncRead({
-      interAccountTransfers: [matching, currentSideAlreadyImported, missingOppositeSideFdx],
+      interAccountTransfers: [matching, differentDescription, differentAmount],
     }),
     bankOrCashAccountKey,
     settledKind: "receipt",
     settledDate: DateTime.makeUnsafe("2026-06-04"),
     absoluteNormalizedAmount: "12.34",
+    settledDescription: "coffee shop",
   })
   expect(decision._tag).toBe("candidate")
   if (decision._tag !== "candidate") {
@@ -865,16 +867,16 @@ test("selects receipt-side settled suspense duplicates from existing transfers",
 test("selects payment-side settled suspense duplicates from existing transfers", () => {
   const first = interAccountTransferItem("transfer-payment-duplicate-1", {
     date: "2026-06-04",
+    description: "Shop",
     paidFrom: bankOrCashAccountKey,
     receivedIn: "bank-2",
     creditAmount: "9.99",
     debitAmount: "9.99",
     fdxCreditTransactionId: null,
-    fdxDebitTransactionId: "opposite-transfer-fdx-1",
+    fdxDebitTransactionId: null,
   })
   const second = interAccountTransferItem("transfer-payment-duplicate-2", {
     ...first.item,
-    fdxDebitTransactionId: "opposite-transfer-fdx-2",
   })
 
   const ambiguous = selectManagerAkahuSuspenseTransferDuplicateCandidate({
@@ -883,6 +885,7 @@ test("selects payment-side settled suspense duplicates from existing transfers",
     settledKind: "payment",
     settledDate: DateTime.makeUnsafe("2026-06-04"),
     absoluteNormalizedAmount: "9.99",
+    settledDescription: "shop",
   })
   expect(ambiguous._tag).toBe("ambiguous")
   if (ambiguous._tag !== "ambiguous") {
