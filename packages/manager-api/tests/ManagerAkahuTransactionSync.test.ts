@@ -34,6 +34,7 @@ import {
   normalizeAkahuTransactionDescription,
   normalizeManagerAkahuAmount,
   selectManagerAkahuMirroredTransferCandidate,
+  selectManagerAkahuSuspenseTransferDuplicateCandidate,
   ManagerBankAccountClearStatusValue,
 } from "../src/index.ts"
 
@@ -824,6 +825,74 @@ test("selects unique mirrored transfer candidates and reports ambiguous candidat
     "transfer-2",
   ])
   expect(ambiguous.warning).toBe("Found 2 possible mirrored Manager inter-account transfers.")
+})
+
+test("selects receipt-side settled suspense duplicates from existing transfers", () => {
+  const matching = interAccountTransferItem("transfer-receipt-duplicate", {
+    date: "2026-06-04",
+    paidFrom: "bank-2",
+    receivedIn: bankOrCashAccountKey,
+    creditAmount: "12.34",
+    debitAmount: "12.340",
+    fdxCreditTransactionId: "opposite-transfer-fdx",
+    fdxDebitTransactionId: null,
+  })
+  const currentSideAlreadyImported = interAccountTransferItem("transfer-current-side", {
+    ...matching.item,
+    fdxDebitTransactionId: "existing-current-side-fdx",
+  })
+  const missingOppositeSideFdx = interAccountTransferItem("transfer-no-opposite-fdx", {
+    ...matching.item,
+    fdxCreditTransactionId: null,
+  })
+
+  const decision = selectManagerAkahuSuspenseTransferDuplicateCandidate({
+    syncRead: managerSyncRead({
+      interAccountTransfers: [matching, currentSideAlreadyImported, missingOppositeSideFdx],
+    }),
+    bankOrCashAccountKey,
+    settledKind: "receipt",
+    settledDate: DateTime.makeUnsafe("2026-06-04"),
+    absoluteNormalizedAmount: "12.34",
+  })
+  expect(decision._tag).toBe("candidate")
+  if (decision._tag !== "candidate") {
+    throw new Error(`Expected candidate, got ${decision._tag}`)
+  }
+  expect(decision.candidate.key).toBe("transfer-receipt-duplicate")
+})
+
+test("selects payment-side settled suspense duplicates from existing transfers", () => {
+  const first = interAccountTransferItem("transfer-payment-duplicate-1", {
+    date: "2026-06-04",
+    paidFrom: bankOrCashAccountKey,
+    receivedIn: "bank-2",
+    creditAmount: "9.99",
+    debitAmount: "9.99",
+    fdxCreditTransactionId: null,
+    fdxDebitTransactionId: "opposite-transfer-fdx-1",
+  })
+  const second = interAccountTransferItem("transfer-payment-duplicate-2", {
+    ...first.item,
+    fdxDebitTransactionId: "opposite-transfer-fdx-2",
+  })
+
+  const ambiguous = selectManagerAkahuSuspenseTransferDuplicateCandidate({
+    syncRead: managerSyncRead({ interAccountTransfers: [first, second] }),
+    bankOrCashAccountKey,
+    settledKind: "payment",
+    settledDate: DateTime.makeUnsafe("2026-06-04"),
+    absoluteNormalizedAmount: "9.99",
+  })
+  expect(ambiguous._tag).toBe("ambiguous")
+  if (ambiguous._tag !== "ambiguous") {
+    throw new Error(`Expected ambiguous, got ${ambiguous._tag}`)
+  }
+  expect(ambiguous.candidates.map((candidate) => candidate.key)).toEqual([
+    "transfer-payment-duplicate-1",
+    "transfer-payment-duplicate-2",
+  ])
+  expect(ambiguous.warning).toBe("Found 2 possible Manager inter-account transfer duplicates.")
 })
 
 test("builds settled credit-side mirrored transfer update payloads without replacing unrelated fields", () => {

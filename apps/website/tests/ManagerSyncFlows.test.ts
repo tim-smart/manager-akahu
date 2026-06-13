@@ -1271,6 +1271,126 @@ it.effect("merges settled transfer mirrors created earlier in the same sync-all 
   }),
 )
 
+it.effect(
+  "skips receipt imports duplicated by transfers created earlier in the same sync-all run",
+  () =>
+    Effect.gen(function* () {
+      const { client, interAccountTransferPayloads, paymentPayloads, receiptPayloads } =
+        makeMockClient({
+          receipts: [],
+          managerAccounts: [
+            makeManagerBankOrCashAccount({
+              key: bankOrCashAccountKey,
+              name: "Manager Checking",
+              transferRules: "Transfer to savings, manager-savings",
+            }),
+            makeManagerBankOrCashAccount({
+              key: destinationBankOrCashAccountKey,
+              name: "Manager Savings",
+            }),
+          ],
+        })
+
+      const summary = yield* syncManagerAkahuTransactions({
+        accounts: [linkedAccount, linkedSavingsAccount],
+        client,
+        tokens,
+        fetchSettledTransactions: (request) =>
+          request.accountId === accountId
+            ? Stream.fromIterable([
+                makeSettledTransactionForAccount(
+                  "settled-transfer-source-credit",
+                  accountId,
+                  "-25.01",
+                  "Transfer to savings",
+                ),
+              ])
+            : Stream.fromIterable([
+                makeSettledTransactionForAccount(
+                  "settled-transfer-ordinary-receipt",
+                  savingsAccountId,
+                  "25.01",
+                  "Transfer from checking",
+                ),
+              ]),
+        fetchPendingTransactions: () => Stream.empty,
+      })
+
+      expect(interAccountTransferPayloads).toHaveLength(1)
+      expect(receiptPayloads).toEqual([])
+      expect(paymentPayloads).toEqual([])
+      expect(summary.overall).toMatchObject({
+        settledFetched: 2,
+        transferRulesMatched: 1,
+        transfersCreated: 1,
+        receiptsCreated: 0,
+        duplicatesSkipped: 1,
+        warnings: 0,
+        errors: 0,
+      })
+    }),
+)
+
+it.effect(
+  "skips payment imports duplicated by transfers created earlier in the same sync-all run",
+  () =>
+    Effect.gen(function* () {
+      const { client, interAccountTransferPayloads, paymentPayloads, receiptPayloads } =
+        makeMockClient({
+          receipts: [],
+          managerAccounts: [
+            makeManagerBankOrCashAccount({
+              key: bankOrCashAccountKey,
+              name: "Manager Checking",
+            }),
+            makeManagerBankOrCashAccount({
+              key: destinationBankOrCashAccountKey,
+              name: "Manager Savings",
+              transferRules: "Transfer from checking, manager-checking",
+            }),
+          ],
+        })
+
+      const summary = yield* syncManagerAkahuTransactions({
+        accounts: [linkedSavingsAccount, linkedAccount],
+        client,
+        tokens,
+        fetchSettledTransactions: (request) =>
+          request.accountId === savingsAccountId
+            ? Stream.fromIterable([
+                makeSettledTransactionForAccount(
+                  "settled-transfer-source-debit",
+                  savingsAccountId,
+                  "25.01",
+                  "Transfer from checking",
+                ),
+              ])
+            : Stream.fromIterable([
+                makeSettledTransactionForAccount(
+                  "settled-transfer-ordinary-payment",
+                  accountId,
+                  "-25.01",
+                  "Transfer to savings",
+                ),
+              ]),
+        fetchPendingTransactions: () => Stream.empty,
+      })
+
+      expect(interAccountTransferPayloads).toHaveLength(1)
+      expect(receiptPayloads).toEqual([])
+      expect(paymentPayloads).toEqual([])
+      expect(summary.overall).toMatchObject({
+        settledFetched: 2,
+        transferRulesMatched: 1,
+        transfersCreated: 1,
+        paymentsCreated: 0,
+        duplicatesSkipped: 1,
+        warnings: 0,
+        errors: 0,
+      })
+    }),
+)
+
 it.effect("preserves existing Manager transfer fields during settled mirror merge", () =>
   Effect.gen(function* () {
     const existingTransfer = makeManagerInterAccountTransfer("existing-transfer-preserve", {
