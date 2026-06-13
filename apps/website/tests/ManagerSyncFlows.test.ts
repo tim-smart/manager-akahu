@@ -525,6 +525,61 @@ it.effect("does not report fingerprinted zero-amount pending rows as stale", () 
   }),
 )
 
+it.effect("settles a pending receipt endpoint recategorized as a Manager transfer", () =>
+  Effect.gen(function* () {
+    const pendingFdxTransactionId = "akahu-pending:v1:akahu-checking:2026-06-05:12.34:coffee shop"
+    const existingTransfer = makeManagerInterAccountTransfer("recategorized-transfer", {
+      date: "2026-06-05",
+      description: "Coffee Shop",
+      paidFrom: destinationBankOrCashAccountKey,
+      receivedIn: bankOrCashAccountKey,
+      creditAmount: "12.34",
+      debitAmount: "12.34",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      fdxDebitTransactionId: pendingFdxTransactionId,
+    })
+    const { client, interAccountTransferPutPayloads, paymentPayloads, receiptPayloads } =
+      makeMockClient({
+        receipts: [],
+        interAccountTransfers: [existingTransfer],
+      })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () =>
+        Stream.fromIterable([
+          makeSettledTransaction("settled-recategorized-receipt", "12.34", "Coffee Shop"),
+        ]),
+      fetchPendingTransactions: () => Stream.empty,
+    })
+
+    expect(receiptPayloads).toEqual([])
+    expect(paymentPayloads).toEqual([])
+    expect(interAccountTransferPutPayloads).toEqual([
+      {
+        key: "recategorized-transfer",
+        value: {
+          ...existingTransfer.item,
+          debitClearStatus: ManagerBankAccountClearStatusValue.onSameDate,
+          fdxDebitTransactionId: "settled-recategorized-receipt",
+        },
+      },
+    ])
+    expect(summary.accounts[0]?.warnings).toEqual([])
+    expect(summary.overall).toMatchObject({
+      settledFetched: 1,
+      receiptsCreated: 0,
+      transfersUpdated: 1,
+      pendingSettled: 1,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
 it.effect("creates pending inter-account transfers for matching transfer rules", () =>
   Effect.gen(function* () {
     const pendingFdxTransactionId =

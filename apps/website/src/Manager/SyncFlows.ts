@@ -14,6 +14,7 @@ import {
   buildAkahuPendingTransferFingerprint,
   buildAkahuPendingTransactionFingerprint,
   buildManagerAkahuSettledMirroredTransferUpdatePayload,
+  buildManagerAkahuSettledTransferEndpointUpdatePayload,
   classifyManagerAkahuInterAccountTransfer,
   classifyManagerAkahuSuspenseImport,
   decideAkahuDateTimeStartDateEligibility,
@@ -712,18 +713,26 @@ const processManagerAkahuSettledTransaction = Effect.fn("processManagerAkahuSett
           })
 
           if (pendingReplacementDecision._tag === "match") {
-            accountState = yield* updateManagerAkahuAccountStateFromClassifiedUpdate({
-              state: state.accountState,
-              client,
-              classification: intent.classification,
-              entry: pendingReplacementDecision.entry,
-              kindMismatchWarning: `Existing pending Manager entry ${pendingReplacementDecision.entry.key} has a different transaction type than the settled Akahu transaction.`,
-              processedFdxTransactionIds: [
-                pendingReplacementDecision.entry.fdxTransactionId,
-                transaction._id,
-              ],
-              successCount: "pendingSettled",
-            })
+            accountState =
+              pendingReplacementDecision.entry._tag === "interAccountTransfer"
+                ? yield* updateManagerAkahuSettledRecategorizedTransferEndpoint({
+                    state: state.accountState,
+                    client,
+                    fdxTransactionId: transaction._id,
+                    entry: pendingReplacementDecision.entry,
+                  })
+                : yield* updateManagerAkahuAccountStateFromClassifiedUpdate({
+                    state: state.accountState,
+                    client,
+                    classification: intent.classification,
+                    entry: pendingReplacementDecision.entry,
+                    kindMismatchWarning: `Existing pending Manager entry ${pendingReplacementDecision.entry.key} has a different transaction type than the settled Akahu transaction.`,
+                    processedFdxTransactionIds: [
+                      pendingReplacementDecision.entry.fdxTransactionId,
+                      transaction._id,
+                    ],
+                    successCount: "pendingSettled",
+                  })
             return continueManagerAkahuSettledPhase({ ...state, accountState })
           }
 
@@ -1027,6 +1036,37 @@ const updateManagerAkahuSettledPendingTransfer = Effect.fn(
 
   return addManagerAkahuTransactionSyncAccountSuccessfulWrite(input.state, {
     processedFdxTransactionIds: [input.pendingFdxTransactionId, input.fdxTransactionId],
+    successCounts: ["transfersUpdated", "pendingSettled"],
+  })
+})
+
+const updateManagerAkahuSettledRecategorizedTransferEndpoint = Effect.fn(
+  "updateManagerAkahuSettledRecategorizedTransferEndpoint",
+)(function* (input: {
+  readonly state: ManagerAkahuTransactionSyncAccountState
+  readonly client: ManagerAkahuTransactionSyncManagerClient
+  readonly fdxTransactionId: string
+  readonly entry: ManagerBankOrCashAccountSyncRead["existingTransferFdxTransactionIdEntries"][number]
+}) {
+  const writeResult = yield* input.client["PUT/api4/inter-account-transfer"](
+    buildManagerAkahuSettledTransferEndpointUpdatePayload({
+      transfer: input.entry.interAccountTransfer,
+      transferSide: input.entry.transferSide,
+      fdxTransactionId: input.fdxTransactionId,
+    }),
+  ).pipe(
+    Effect.as({ _tag: "updated" as const }),
+    Effect.catch((error) =>
+      Effect.succeed({ _tag: "error" as const, error: formatSyncError(error) }),
+    ),
+  )
+
+  if (writeResult._tag === "error") {
+    return addManagerAkahuTransactionSyncAccountError(input.state, writeResult.error)
+  }
+
+  return addManagerAkahuTransactionSyncAccountSuccessfulWrite(input.state, {
+    processedFdxTransactionIds: [input.entry.fdxTransactionId, input.fdxTransactionId],
     successCounts: ["transfersUpdated", "pendingSettled"],
   })
 })

@@ -17,6 +17,7 @@ import {
 import type {
   ManagerBankOrCashAccountSyncRead,
   ManagerExistingFdxTransactionIdEntry,
+  ManagerExistingFdxTransactionIdTransferSide,
   ManagerExistingReceiptPaymentFdxTransactionIdEntry,
   ManagerExistingTransferFdxTransactionIdEntry,
 } from "./ManagerBatchPagination.ts"
@@ -302,7 +303,7 @@ export type ManagerAkahuPendingExactFingerprintDecision =
 export interface ManagerAkahuPendingToSettledMatchInput {
   readonly syncRead: Pick<
     ManagerBankOrCashAccountSyncRead,
-    "bankOrCashAccountKey" | "existingReceiptPaymentFdxTransactionIdEntries"
+    "bankOrCashAccountKey" | "existingFdxTransactionIdEntries"
   >
   readonly settledDate: DateTime.DateTime
   readonly settledSignedAmount: ManagerAkahuDecimalInput
@@ -313,11 +314,11 @@ export interface ManagerAkahuPendingToSettledMatchInput {
 }
 
 export type ManagerAkahuPendingToSettledMatchDecision =
-  | { readonly _tag: "match"; readonly entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry }
+  | { readonly _tag: "match"; readonly entry: ManagerExistingFdxTransactionIdEntry }
   | { readonly _tag: "none" }
   | {
       readonly _tag: "ambiguous"
-      readonly candidates: ReadonlyArray<ManagerExistingReceiptPaymentFdxTransactionIdEntry>
+      readonly candidates: ReadonlyArray<ManagerExistingFdxTransactionIdEntry>
       readonly warning: string
     }
   | { readonly _tag: "unsupported"; readonly warning: string }
@@ -864,6 +865,26 @@ export const buildManagerAkahuSettledMirroredTransferUpdatePayload = (
   }
 }
 
+export const buildManagerAkahuSettledTransferEndpointUpdatePayload = (input: {
+  readonly transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number]
+  readonly transferSide: ManagerExistingFdxTransactionIdTransferSide
+  readonly fdxTransactionId: string
+}): ManagerAkahuInterAccountTransferUpdatePayload => ({
+  key: input.transfer.key,
+  value:
+    input.transferSide === "credit"
+      ? {
+          ...input.transfer.item,
+          creditClearStatus: managerSettledInterAccountTransferClearanceFields.creditClearStatus,
+          fdxCreditTransactionId: input.fdxTransactionId,
+        }
+      : {
+          ...input.transfer.item,
+          debitClearStatus: managerSettledInterAccountTransferClearanceFields.debitClearStatus,
+          fdxDebitTransactionId: input.fdxTransactionId,
+        },
+})
+
 export const decidePendingTransferToSettledMatch = (
   input: ManagerAkahuPendingTransferToSettledMatchInput,
 ): ManagerAkahuPendingTransferToSettledMatchDecision => {
@@ -998,21 +1019,64 @@ const getEntryDate = (entry: ManagerExistingFdxTransactionIdEntry) => {
   }
 }
 
-const getEntryItem = (entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry) =>
-  entry._tag === "receipt" ? entry.receipt.item : entry.payment.item
+const getEntryLineAmount = (
+  entry: ManagerExistingFdxTransactionIdEntry,
+  settledKind: ManagerAkahuTransactionKind,
+): unknown => {
+  switch (entry._tag) {
+    case "receipt":
+      return entry.receipt.item.lines?.[0]?.amount
+    case "payment":
+      return entry.payment.item.lines?.[0]?.amount
+    case "interAccountTransfer":
+      return settledKind === "receipt"
+        ? entry.interAccountTransfer.item.debitAmount
+        : entry.interAccountTransfer.item.creditAmount
+  }
+}
 
-const getEntryLineAmount = (entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry): unknown =>
-  getEntryItem(entry).lines?.[0]?.amount
-
-const getEntryDescription = (entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry): string => {
-  const item = getEntryItem(entry)
-  return item.description ?? item.lines?.[0]?.lineDescription ?? ""
+const getEntryDescription = (entry: ManagerExistingFdxTransactionIdEntry): string => {
+  switch (entry._tag) {
+    case "receipt": {
+      const item = entry.receipt.item
+      return item.description ?? item.lines?.[0]?.lineDescription ?? ""
+    }
+    case "payment": {
+      const item = entry.payment.item
+      return item.description ?? item.lines?.[0]?.lineDescription ?? ""
+    }
+    case "interAccountTransfer":
+      return entry.interAccountTransfer.item.description ?? ""
+  }
 }
 
 const getEntryBankOrCashAccountKey = (
-  entry: ManagerExistingReceiptPaymentFdxTransactionIdEntry,
+  entry: ManagerExistingFdxTransactionIdEntry,
+  settledKind: ManagerAkahuTransactionKind,
 ): string | null | undefined =>
-  entry._tag === "receipt" ? entry.receipt.item.receivedIn : entry.payment.item.paidFrom
+  entry._tag === "receipt"
+    ? entry.receipt.item.receivedIn
+    : entry._tag === "payment"
+      ? entry.payment.item.paidFrom
+      : settledKind === "receipt"
+        ? entry.interAccountTransfer.item.receivedIn
+        : entry.interAccountTransfer.item.paidFrom
+
+const normalizeManagerEntryLineAmount = (amount: unknown): ManagerLineAmount | undefined => {
+  if (typeof amount !== "string" && typeof amount !== "number") {
+    return undefined
+  }
+
+  const normalized = normalizeManagerAkahuAmount(
+    typeof amount === "number" ? String(amount) : amount,
+  )
+  return normalized._tag === "amount" ? normalized.amount : undefined
+}
+
+const isEntryMatchingSettledKind = (
+  entry: ManagerExistingFdxTransactionIdEntry,
+  settledKind: ManagerAkahuTransactionKind,
+): boolean => entry._tag === "interAccountTransfer" || getEntryKind(entry) === settledKind
 
 const getSignedAmountKind = (amount: ManagerLineAmount): ManagerAkahuTransactionKind | "zero" => {
   if (isZeroManagerAkahuLineAmount(amount)) {
@@ -1044,35 +1108,29 @@ export const decidePendingToSettledMatch = (
   const dateWindowDays = input.dateWindowDays ?? 3
   const settledDescription = normalizeAkahuTransactionDescription(input.settledDescription)
   const settledAbsoluteAmount = getAbsoluteManagerAkahuAmount(settledAmount.amount)
-  const candidates: Array<ManagerExistingReceiptPaymentFdxTransactionIdEntry> = []
+  const candidates: Array<ManagerExistingFdxTransactionIdEntry> = []
 
-  for (const entry of input.syncRead.existingReceiptPaymentFdxTransactionIdEntries) {
+  for (const entry of input.syncRead.existingFdxTransactionIdEntries) {
     if (input.excludedFdxTransactionIds.has(entry.fdxTransactionId)) {
       continue
     }
     if (!isAkahuPendingFdxTransactionId(entry.fdxTransactionId)) {
       continue
     }
-    if (getEntryBankOrCashAccountKey(entry) !== input.syncRead.bankOrCashAccountKey) {
+    if (getEntryBankOrCashAccountKey(entry, settledKind) !== input.syncRead.bankOrCashAccountKey) {
       continue
     }
     if (isEntryKnownBeforeManagerAkahuStartDate(entry, input.startDate)) {
       continue
     }
-    if (getEntryKind(entry) !== settledKind) {
+    if (!isEntryMatchingSettledKind(entry, settledKind)) {
       continue
     }
 
-    const entryAmount = getEntryLineAmount(entry)
-    if (typeof entryAmount !== "string") {
-      continue
-    }
-
-    const normalizedEntryAmount = normalizeManagerAkahuAmount(entryAmount)
-    if (
-      normalizedEntryAmount._tag === "unsupported" ||
-      normalizedEntryAmount.amount !== settledAbsoluteAmount
-    ) {
+    const normalizedEntryAmount = normalizeManagerEntryLineAmount(
+      getEntryLineAmount(entry, settledKind),
+    )
+    if (normalizedEntryAmount !== settledAbsoluteAmount) {
       continue
     }
 
@@ -1080,7 +1138,7 @@ export const decidePendingToSettledMatch = (
       continue
     }
 
-    const entryDate = getEntryItem(entry).date
+    const entryDate = getEntryDate(entry)
     const entryCalendarDate =
       typeof entryDate === "string" ? DateTime.make(entryDate) : Option.none()
     if (Option.isNone(entryCalendarDate)) {

@@ -1128,27 +1128,34 @@ test("safely matches exactly one pending candidate to a settled transaction", ()
   expect(decision.entry.key).toBe("receipt-1")
 })
 
-test("matches pending to settled from receipt/payment FDX entries only", () => {
+test("matches pending to settled from transfer FDX entries after Manager recategorization", () => {
   const fingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:12.34:coffee shop`
   const transfer = interAccountTransferItem("transfer-1", {
-    paidFrom: bankOrCashAccountKey,
-    receivedIn: "bank-2",
+    paidFrom: "bank-2",
+    receivedIn: bankOrCashAccountKey,
     date: "2026-06-04",
     debitAmount: "12.34",
     creditAmount: "12.34",
     description: "Coffee Shop",
-    fdxCreditTransactionId: fingerprint,
+    fdxDebitTransactionId: fingerprint,
   })
 
-  expect(
-    decidePendingToSettledMatch({
-      syncRead: managerSyncRead({ interAccountTransfers: [transfer] }),
-      settledDate: DateTime.makeUnsafe("2026-06-04"),
-      settledSignedAmount: "12.34",
-      settledDescription: "coffee shop",
-      excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
-    }),
-  ).toEqual({ _tag: "none" })
+  const transferDecision = decidePendingToSettledMatch({
+    syncRead: managerSyncRead({ interAccountTransfers: [transfer] }),
+    settledDate: DateTime.makeUnsafe("2026-06-04"),
+    settledSignedAmount: "12.34",
+    settledDescription: "coffee shop",
+    excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
+  })
+  expect(transferDecision._tag).toBe("match")
+  if (transferDecision._tag !== "match") {
+    throw new Error(`Expected match, got ${transferDecision._tag}`)
+  }
+  expect(transferDecision.entry).toMatchObject({
+    _tag: "interAccountTransfer",
+    key: "transfer-1",
+    transferSide: "debit",
+  })
 
   const decision = decidePendingToSettledMatch({
     syncRead: managerSyncRead({
@@ -1160,11 +1167,37 @@ test("matches pending to settled from receipt/payment FDX entries only", () => {
     settledDescription: "coffee shop",
     excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
   })
+  expect(decision._tag).toBe("ambiguous")
+})
+
+test("matches pending payment to settled from transfer FDX entries after Manager recategorization", () => {
+  const fingerprint = `${managerAkahuPendingFingerprintPrefix}acc:2026-06-04:-9.99:shop`
+  const transfer = interAccountTransferItem("transfer-payment", {
+    paidFrom: bankOrCashAccountKey,
+    receivedIn: "bank-2",
+    date: "2026-06-04",
+    debitAmount: "9.99",
+    creditAmount: "9.99",
+    description: "Shop",
+    fdxCreditTransactionId: fingerprint,
+  })
+
+  const decision = decidePendingToSettledMatch({
+    syncRead: managerSyncRead({ interAccountTransfers: [transfer] }),
+    settledDate: DateTime.makeUnsafe("2026-06-04"),
+    settledSignedAmount: "-9.99",
+    settledDescription: "shop",
+    excludedFdxTransactionIds: noExcludedFdxTransactionIds(),
+  })
   expect(decision._tag).toBe("match")
   if (decision._tag !== "match") {
     throw new Error(`Expected match, got ${decision._tag}`)
   }
-  expect(decision.entry.key).toBe("receipt-1")
+  expect(decision.entry).toMatchObject({
+    _tag: "interAccountTransfer",
+    key: "transfer-payment",
+    transferSide: "credit",
+  })
 })
 
 test("excludes unavailable pending candidates from pending-to-settled matching", () => {
