@@ -1247,7 +1247,28 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
 
     switch (classification._tag) {
       case "receipt":
-      case "payment":
+      case "payment": {
+        if (exactFingerprintDecision._tag === "create") {
+          const transferDuplicateDecision = selectManagerAkahuSuspenseTransferDuplicateCandidate({
+            syncRead,
+            bankOrCashAccountKey: account.key,
+            settledDate: transaction.date,
+            absoluteNormalizedAmount: classification.absoluteNormalizedAmount,
+          })
+
+          if (transferDuplicateDecision._tag === "candidate") {
+            return incrementManagerAkahuTransactionSyncAccountCount(state, "duplicatesSkipped")
+          }
+
+          if (transferDuplicateDecision._tag === "ambiguous") {
+            return addManagerAkahuTransactionSyncAccountWarningSkip(
+              state,
+              transferDuplicateDecision.warning,
+              "duplicatesSkipped",
+            )
+          }
+        }
+
         return exactFingerprintDecision._tag === "create"
           ? yield* createManagerAkahuTransaction({
               state,
@@ -1265,6 +1286,7 @@ const processManagerAkahuPendingTransaction = Effect.fn("processManagerAkahuPend
               processedFdxTransactionIds: [fingerprintDecision.fingerprint],
               successCount: "pendingUpdated",
             })
+      }
       case "zero":
         return incrementManagerAkahuTransactionSyncAccountCount(state, "zeroAmountSkipped")
       case "unsupported":

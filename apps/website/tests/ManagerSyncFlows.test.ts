@@ -457,6 +457,58 @@ it.effect("processes pending transactions on or after the start date and ignores
   }),
 )
 
+it.effect("skips pending receipt and payment imports duplicated by existing transfers", () =>
+  Effect.gen(function* () {
+    const receiptDuplicateTransfer = makeManagerInterAccountTransfer("pending-receipt-transfer", {
+      date: "2026-06-05",
+      description: "Different transfer receipt description",
+      paidFrom: destinationBankOrCashAccountKey,
+      receivedIn: bankOrCashAccountKey,
+      creditAmount: "12.34",
+      debitAmount: "12.34",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+    })
+    const paymentDuplicateTransfer = makeManagerInterAccountTransfer("pending-payment-transfer", {
+      date: "2026-06-05",
+      description: "Different transfer payment description",
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: destinationBankOrCashAccountKey,
+      creditAmount: "9.99",
+      debitAmount: "9.99",
+      creditClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+      debitClearStatus: ManagerBankAccountClearStatusValue.onLaterDate,
+    })
+    const { client, paymentPayloads, receiptPayloads } = makeMockClient({
+      receipts: [],
+      interAccountTransfers: [receiptDuplicateTransfer, paymentDuplicateTransfer],
+    })
+
+    const summary = yield* syncManagerAkahuTransactions({
+      accounts: [linkedAccount],
+      client,
+      tokens,
+      fetchSettledTransactions: () => Stream.empty,
+      fetchPendingTransactions: () =>
+        Stream.fromIterable([
+          makePendingTransaction("Pending receipt different description", "12.34"),
+          makePendingTransaction("Pending payment different description", "-9.99"),
+        ]),
+    })
+
+    expect(receiptPayloads).toEqual([])
+    expect(paymentPayloads).toEqual([])
+    expect(summary.overall).toMatchObject({
+      pendingFetched: 2,
+      receiptsCreated: 0,
+      paymentsCreated: 0,
+      duplicatesSkipped: 2,
+      warnings: 0,
+      errors: 0,
+    })
+  }),
+)
+
 it.effect("ignores pre-start Manager pending entries during stale pending detection", () =>
   Effect.gen(function* () {
     const startDate = DateTime.makeUnsafe("2026-06-04")
