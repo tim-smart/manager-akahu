@@ -829,11 +829,11 @@ test("selects unique mirrored transfer candidates and reports ambiguous candidat
 
 test("selects settled suspense duplicates from transfers when either side matches the account", () => {
   const matching = interAccountTransferItem("transfer-receipt-duplicate", {
-    date: "2026-06-04",
+    date: "2026-06-04T00:00:00",
     description: "Coffee Shop",
     paidFrom: bankOrCashAccountKey,
     receivedIn: "bank-2",
-    creditAmount: "12.34",
+    creditAmount: "-12.34",
     debitAmount: "12.340",
     fdxCreditTransactionId: null,
     fdxDebitTransactionId: null,

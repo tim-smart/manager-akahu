@@ -807,6 +807,14 @@ const getTransferAmountForSide = (
     side === "credit" ? transfer.item.creditAmount : transfer.item.debitAmount,
   )
 
+const getTransferIsoDate = (
+  transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
+): string | undefined => {
+  const date =
+    typeof transfer.item.date === "string" ? DateTime.make(transfer.item.date) : Option.none()
+  return Option.isSome(date) ? DateTime.formatIsoDate(date.value) : undefined
+}
+
 const isTransferAccountSideMatch = (
   transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
   bankOrCashAccountKey: string,
@@ -817,9 +825,16 @@ const isTransferAccountSideMatch = (
 const isTransferAmountMatch = (
   transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
   absoluteNormalizedAmount: ManagerLineAmount,
-): boolean =>
-  getTransferAmountForSide(transfer, "credit") === absoluteNormalizedAmount ||
-  getTransferAmountForSide(transfer, "debit") === absoluteNormalizedAmount
+): boolean => {
+  const creditAmount = getTransferAmountForSide(transfer, "credit")
+  const debitAmount = getTransferAmountForSide(transfer, "debit")
+  return (
+    (creditAmount !== undefined &&
+      getAbsoluteManagerAkahuAmount(creditAmount) === absoluteNormalizedAmount) ||
+    (debitAmount !== undefined &&
+      getAbsoluteManagerAkahuAmount(debitAmount) === absoluteNormalizedAmount)
+  )
+}
 
 export const selectManagerAkahuSuspenseTransferDuplicateCandidate = (
   input: ManagerAkahuSuspenseTransferDuplicateCandidateInput,
@@ -829,7 +844,7 @@ export const selectManagerAkahuSuspenseTransferDuplicateCandidate = (
     if (!isTransferAccountSideMatch(transfer, input.bankOrCashAccountKey)) {
       return false
     }
-    if (transfer.item.date !== settledDate) {
+    if (getTransferIsoDate(transfer) !== settledDate) {
       return false
     }
     return isTransferAmountMatch(transfer, input.absoluteNormalizedAmount)
