@@ -1,4 +1,4 @@
-import { type Brand, DateTime, Schema, SchemaGetter } from "effect"
+import { type Brand, DateTime, flow, Schema, SchemaGetter } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { BigDecimalFromNumber } from "./shared.ts"
 
@@ -64,10 +64,12 @@ const OptionalDateTimeUtc = Schema.optional(Schema.DateTimeUtcFromString).pipe(
   }),
 )
 
-const DateUtc = Schema.String.pipe(
+const DateExclusive = Schema.String.pipe(
   Schema.decodeTo(Schema.DateTimeUtc, {
     decode: SchemaGetter.transform((value) => DateTime.makeUnsafe(value).pipe(DateTime.removeTime)),
-    encode: SchemaGetter.transform(DateTime.formatIsoDate),
+    encode: SchemaGetter.transform(
+      flow(DateTime.removeTime, DateTime.subtract({ milliseconds: 1 }), DateTime.formatIso),
+    ),
   }),
 )
 
@@ -104,7 +106,7 @@ export const AkahuApi = HttpApi.make("akahu").add(
       },
       query: {
         cursor: Schema.optional(Schema.String),
-        start: Schema.optional(DateUtc),
+        start: Schema.optional(DateExclusive),
       },
       success: PaginatedResponse(Transaction),
     }),
@@ -115,7 +117,7 @@ export const AkahuApi = HttpApi.make("akahu").add(
       query: {
         amount_as_number: Schema.Literal("true"),
         cursor: Schema.optional(Schema.String),
-        start: Schema.optional(DateUtc),
+        start: Schema.optional(DateExclusive),
       },
       success: PaginatedResponse(PendingTransaction),
     }),
