@@ -16,6 +16,7 @@ RUN apt-get update \
 COPY . .
 
 RUN pnpm install --frozen-lockfile
+ARG APP_BUILD_REVISION
 RUN pnpm --filter=@app/domain build \
   && pnpm --filter=server build \
   && pnpm --filter=website bundle

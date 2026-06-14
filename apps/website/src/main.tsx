@@ -12,6 +12,8 @@ import { LinkedAccountsSyncSection } from "./Manager/LinkedAccountsSyncSection"
 import { SetupMessage, SetupStack, StaleSelections } from "./Manager/SetupUi"
 import { useManagerAkahuSyncController } from "./Manager/useManagerAkahuSyncController"
 
+const appBuildVersion = import.meta.env.VITE_APP_BUILD_VERSION
+
 function App() {
   const setupState = useAtomValue(akahuSetupStateAtom)
   const refreshSetupState = useAtomRefresh(akahuSetupStateAtom)
@@ -22,25 +24,30 @@ function App() {
 
   return (
     <main className="min-h-svh bg-background px-4 py-10 text-foreground sm:px-6 sm:py-16">
-      <section className="mx-auto flex max-w-4xl flex-col gap-8 rounded-xl border bg-card p-6 shadow-sm sm:p-8">
-        {AsyncResult.matchWithWaiting(setupState, {
-          onWaiting: () => <LoadingSetup />,
-          onError: () => <RetryableError onRetry={refreshSetupState} />,
-          onDefect: () => <RetryableError onRetry={refreshSetupState} />,
-          onSuccess: ({ value }) =>
-            value._tag === "ready" ? (
-              <LinkedAccountsSyncSection
-                setupState={value}
-                syncState={syncController.state}
-                onOpen={syncController.open}
-                onCancel={syncController.close}
-                onStart={syncController.start}
-              />
-            ) : (
-              <SetupStateView setupState={value} onRetry={refreshSetupState} />
-            ),
-        })}
-      </section>
+      <div className="mx-auto flex max-w-4xl flex-col gap-4">
+        <section className="flex flex-col gap-8 rounded-xl border bg-card p-6 shadow-sm sm:p-8">
+          {AsyncResult.matchWithWaiting(setupState, {
+            onWaiting: () => <LoadingSetup />,
+            onError: () => <RetryableError onRetry={refreshSetupState} />,
+            onDefect: () => <RetryableError onRetry={refreshSetupState} />,
+            onSuccess: ({ value }) =>
+              value._tag === "ready" ? (
+                <LinkedAccountsSyncSection
+                  setupState={value}
+                  syncState={syncController.state}
+                  onOpen={syncController.open}
+                  onCancel={syncController.close}
+                  onStart={syncController.start}
+                />
+              ) : (
+                <SetupStateView setupState={value} onRetry={refreshSetupState} />
+              ),
+          })}
+        </section>
+        <footer className="text-center text-xs text-muted-foreground" aria-label="Build version">
+          Build {appBuildVersion}
+        </footer>
+      </div>
     </main>
   )
 }
