@@ -829,12 +829,12 @@ test("selects unique mirrored transfer candidates and reports ambiguous candidat
 
 test("selects settled suspense duplicates from transfers when either side matches the account", () => {
   const matching = interAccountTransferItem("transfer-receipt-duplicate", {
-    date: "2026-06-04T00:00:00",
+    date: "2026-06-04T23:30:00+13:00",
     description: "Coffee Shop",
-    paidFrom: bankOrCashAccountKey,
+    paidFrom: ` ${bankOrCashAccountKey} `,
     receivedIn: "bank-2",
-    creditAmount: "-12.34",
-    debitAmount: "12.340",
+    creditAmount: "-1,212.34",
+    debitAmount: "1,212.340",
     fdxCreditTransactionId: null,
     fdxDebitTransactionId: null,
   })
@@ -855,7 +855,7 @@ test("selects settled suspense duplicates from transfers when either side matche
     }),
     bankOrCashAccountKey,
     settledDate: DateTime.makeUnsafe("2026-06-04"),
-    absoluteNormalizedAmount: "12.34",
+    absoluteNormalizedAmount: "1212.34",
   })
   expect(decision._tag).toBe("candidate")
   if (decision._tag !== "candidate") {
@@ -894,6 +894,32 @@ test("selects payment-side settled suspense duplicates from existing transfers",
     "transfer-payment-duplicate-2",
   ])
   expect(ambiguous.warning).toBe("Found 2 possible Manager inter-account transfer duplicates.")
+})
+
+test("selects captured lump sum transfer duplicate with different Akahu description", () => {
+  const transfer = interAccountTransferItem("019ec343-4c86-7e2f-b24d-b8247f0109b5", {
+    date: "2026-06-04T00:00:00",
+    description: "To: 88248763-1005 Lump Sum Loan Payment",
+    paidFrom: bankOrCashAccountKey,
+    creditAmount: 30000,
+    receivedIn: "bank-2",
+    debitAmount: 30000,
+    fdxDebitTransactionId: null,
+    fdxCreditTransactionId: null,
+  })
+
+  const decision = selectManagerAkahuSuspenseTransferDuplicateCandidate({
+    syncRead: managerSyncRead({ interAccountTransfers: [transfer] }),
+    bankOrCashAccountKey,
+    settledDate: DateTime.makeUnsafe("2026-06-04T06:25:25.000Z"),
+    absoluteNormalizedAmount: "30000.00",
+  })
+
+  expect(decision._tag).toBe("candidate")
+  if (decision._tag !== "candidate") {
+    throw new Error(`Expected candidate, got ${decision._tag}`)
+  }
+  expect(decision.candidate.key).toBe("019ec343-4c86-7e2f-b24d-b8247f0109b5")
 })
 
 test("builds settled credit-side mirrored transfer update payloads without replacing unrelated fields", () => {

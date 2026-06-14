@@ -748,9 +748,8 @@ const normalizeManagerInterAccountTransferReadAmount = (
     return undefined
   }
 
-  const normalized = normalizeManagerAkahuAmount(
-    typeof amount === "number" ? String(amount) : amount,
-  )
+  const input = typeof amount === "number" ? String(amount) : amount.replaceAll(",", "").trim()
+  const normalized = normalizeManagerAkahuAmount(input)
   return normalized._tag === "amount" ? normalized.amount : undefined
 }
 
@@ -810,17 +809,29 @@ const getTransferAmountForSide = (
 const getTransferIsoDate = (
   transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
 ): string | undefined => {
-  const date =
-    typeof transfer.item.date === "string" ? DateTime.make(transfer.item.date) : Option.none()
+  if (typeof transfer.item.date !== "string") {
+    return undefined
+  }
+
+  const isoDatePrefix = transfer.item.date.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
+  if (isoDatePrefix !== undefined) {
+    return isoDatePrefix
+  }
+
+  const date = DateTime.make(transfer.item.date)
   return Option.isSome(date) ? DateTime.formatIsoDate(date.value) : undefined
 }
 
 const isTransferAccountSideMatch = (
   transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],
   bankOrCashAccountKey: string,
-): boolean =>
-  transfer.item.paidFrom === bankOrCashAccountKey ||
-  transfer.item.receivedIn === bankOrCashAccountKey
+): boolean => {
+  const normalizedBankOrCashAccountKey = bankOrCashAccountKey.trim()
+  return (
+    transfer.item.paidFrom?.trim() === normalizedBankOrCashAccountKey ||
+    transfer.item.receivedIn?.trim() === normalizedBankOrCashAccountKey
+  )
+}
 
 const isTransferAmountMatch = (
   transfer: ManagerBankOrCashAccountSyncRead["interAccountTransfers"][number],

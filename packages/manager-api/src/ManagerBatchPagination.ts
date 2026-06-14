@@ -303,18 +303,12 @@ export const fetchAllManagerInterAccountTransfersForBankOrCashAccount = Effect.f
   client: ManagerInterAccountTransferBatchClient,
   input: ManagerBankOrCashAccountBatchReadInput,
 ) {
-  const interAccountTransfers = yield* fetchAllManagerBatchItems({
+  return yield* fetchAllManagerBatchItems({
     input,
     fetchPage: client["GET/api4/inter-account-transfer-batch"],
     buildParams: buildManagerInterAccountTransferBatchParams,
     getItems: (page: BusinessObjectsResourceOfInterAccountTransfer) => page.items,
   })
-
-  return interAccountTransfers.filter(
-    (interAccountTransfer) =>
-      interAccountTransfer.item.paidFrom === input.bankOrCashAccountKey ||
-      interAccountTransfer.item.receivedIn === input.bankOrCashAccountKey,
-  )
 })
 
 export const fetchManagerBankOrCashAccountSyncRead = Effect.fn(

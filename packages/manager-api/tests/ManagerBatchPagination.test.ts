@@ -273,46 +273,42 @@ it.effect("fetches every Manager payment batch page for the selected bank/cash a
   }),
 )
 
-it.effect(
-  "fetches every Manager inter-account transfer page and filters to the selected account",
-  () =>
-    Effect.gen(function* () {
-      const requests: Array<ManagerInterAccountTransferBatchParams> = []
-      const unrelatedTransfer = { paidFrom: "bank-unrelated-1", receivedIn: "bank-unrelated-2" }
-      const pages = new Map<number, ReadonlyArray<ManagerInterAccountTransferItem>>([
-        interAccountTransferPage(0, fullPageSize),
-        interAccountTransferPage(
-          1,
-          3,
-          new Map([
-            [0, { paidFrom: "bank-other", receivedIn: bankOrCashAccountKey }],
-            [1, unrelatedTransfer],
-            [2, { paidFrom: bankOrCashAccountKey, receivedIn: "bank-other" }],
-          ]),
-        ),
-      ])
-      const client = makeInterAccountTransferBatchClient(pages, requests)
+it.effect("fetches every Manager inter-account transfer page for duplicate matching", () =>
+  Effect.gen(function* () {
+    const requests: Array<ManagerInterAccountTransferBatchParams> = []
+    const unrelatedTransfer = { paidFrom: "bank-unrelated-1", receivedIn: "bank-unrelated-2" }
+    const pages = new Map<number, ReadonlyArray<ManagerInterAccountTransferItem>>([
+      interAccountTransferPage(0, fullPageSize),
+      interAccountTransferPage(
+        1,
+        3,
+        new Map([
+          [0, { paidFrom: "bank-other", receivedIn: bankOrCashAccountKey }],
+          [1, unrelatedTransfer],
+          [2, { paidFrom: bankOrCashAccountKey, receivedIn: "bank-other" }],
+        ]),
+      ),
+    ])
+    const client = makeInterAccountTransferBatchClient(pages, requests)
 
-      const interAccountTransfers = yield* fetchAllManagerInterAccountTransfersForBankOrCashAccount(
-        client,
-        publicSyncReadInput,
-      )
+    const interAccountTransfers = yield* fetchAllManagerInterAccountTransfersForBankOrCashAccount(
+      client,
+      publicSyncReadInput,
+    )
 
-      expect(interAccountTransfers).toHaveLength(totalItems(fullPageSize, 2))
-      expect(interAccountTransfers[0]?.key).toBe(itemKey("inter-account-transfer", 0))
-      expect(interAccountTransfers.at(-2)?.item).toEqual({
-        paidFrom: "bank-other",
-        receivedIn: bankOrCashAccountKey,
-      })
-      expect(interAccountTransfers.at(-1)?.item).toEqual({
-        paidFrom: bankOrCashAccountKey,
-        receivedIn: "bank-other",
-      })
-      expect(interAccountTransfers.some((transfer) => transfer.item === unrelatedTransfer)).toBe(
-        false,
-      )
-      expectInterAccountTransferBatchRequests(requests, [0, 1], { business })
-    }),
+    expect(interAccountTransfers).toHaveLength(totalItems(fullPageSize, 3))
+    expect(interAccountTransfers[0]?.key).toBe(itemKey("inter-account-transfer", 0))
+    expect(interAccountTransfers.at(-3)?.item).toEqual({
+      paidFrom: "bank-other",
+      receivedIn: bankOrCashAccountKey,
+    })
+    expect(interAccountTransfers.at(-2)?.item).toBe(unrelatedTransfer)
+    expect(interAccountTransfers.at(-1)?.item).toEqual({
+      paidFrom: bankOrCashAccountKey,
+      receivedIn: "bank-other",
+    })
+    expectInterAccountTransferBatchRequests(requests, [0, 1], { business })
+  }),
 )
 
 it.effect(
@@ -357,23 +353,19 @@ it.effect(
         fdxCreditTransactionId: "akahu-tx-existing",
         fdxDebitTransactionId: "transfer-debit",
       })
+      const unrelatedInterAccountTransfer = interAccountTransferItem(
+        "inter-account-transfer-unrelated",
+        {
+          paidFrom: "bank-unrelated-1",
+          receivedIn: "bank-unrelated-2",
+          fdxCreditTransactionId: "unrelated-credit",
+          fdxDebitTransactionId: "unrelated-debit",
+        },
+      )
       const interAccountTransferPages = new Map<
         number,
         ReadonlyArray<ManagerInterAccountTransferItem>
-      >([
-        [
-          0,
-          [
-            interAccountTransfer,
-            interAccountTransferItem("inter-account-transfer-unrelated", {
-              paidFrom: "bank-unrelated-1",
-              receivedIn: "bank-unrelated-2",
-              fdxCreditTransactionId: "unrelated-credit",
-              fdxDebitTransactionId: "unrelated-debit",
-            }),
-          ],
-        ],
-      ])
+      >([[0, [interAccountTransfer, unrelatedInterAccountTransfer]]])
       const client = makeSyncReadClient({
         receiptPages,
         receiptRequests,
@@ -387,7 +379,10 @@ it.effect(
       expect(syncRead.bankOrCashAccountKey).toBe(bankOrCashAccountKey)
       expect(syncRead.receipts).toHaveLength(totalItems(fullPageSize, 2))
       expect(syncRead.payments).toHaveLength(totalItems(fullPageSize, 2))
-      expect(syncRead.interAccountTransfers).toEqual([interAccountTransfer])
+      expect(syncRead.interAccountTransfers).toEqual([
+        interAccountTransfer,
+        unrelatedInterAccountTransfer,
+      ])
       expectKeyAtPageOffset(syncRead.receipts, "receipt", 0)
       expectKeyAtPageOffset(syncRead.receipts, "receipt", 1)
       expectKeyAtPageOffset(syncRead.payments, "payment", 0)
@@ -404,6 +399,8 @@ it.effect(
         "payment-last",
         "akahu-tx-existing",
         "transfer-debit",
+        "unrelated-credit",
+        "unrelated-debit",
       ])
       expect(
         syncRead.existingReceiptPaymentFdxTransactionIdEntries.map(
@@ -420,7 +417,7 @@ it.effect(
       ])
       expect(
         syncRead.existingTransferFdxTransactionIdEntries.map((entry) => entry.fdxTransactionId),
-      ).toEqual(["akahu-tx-existing", "transfer-debit"])
+      ).toEqual(["akahu-tx-existing", "transfer-debit", "unrelated-credit", "unrelated-debit"])
       expect(
         syncRead.existingReceiptPaymentFdxTransactionIdIndex.get("akahu-tx-existing"),
       ).toHaveLength(2)
