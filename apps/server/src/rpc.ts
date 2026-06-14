@@ -22,8 +22,8 @@ export const ApiHandlersBase = ApiRpcs.toLayer(
             userToken: akahuUserToken,
           }),
         ),
-      AccountPendingTransactions: ({ akahuAppToken, akahuUserToken, accountId }) =>
-        akahu.pendingTransactions({ accountId }).pipe(
+      AccountPendingTransactions: ({ akahuAppToken, akahuUserToken, accountId, start }) =>
+        akahu.pendingTransactions({ accountId, start }).pipe(
           Stream.provideService(AkahuCredentials, {
             appToken: akahuAppToken,
             userToken: akahuUserToken,

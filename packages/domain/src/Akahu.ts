@@ -64,6 +64,13 @@ const OptionalDateTimeUtc = Schema.optional(Schema.DateTimeUtcFromString).pipe(
   }),
 )
 
+const DateUtc = Schema.String.pipe(
+  Schema.decodeTo(Schema.DateTimeUtc, {
+    decode: SchemaGetter.transform((value) => DateTime.makeUnsafe(value).pipe(DateTime.removeTime)),
+    encode: SchemaGetter.transform(DateTime.formatIsoDate),
+  }),
+)
+
 class Refreshed extends Schema.Class<Refreshed>("akahu/Refreshed")({
   meta: Schema.DateTimeUtcFromString,
   transactions: OptionalDateTimeUtc,
@@ -97,7 +104,7 @@ export const AkahuApi = HttpApi.make("akahu").add(
       },
       query: {
         cursor: Schema.optional(Schema.String),
-        start: Schema.optional(Schema.DateTimeUtc),
+        start: Schema.optional(DateUtc),
       },
       success: PaginatedResponse(Transaction),
     }),
@@ -108,6 +115,7 @@ export const AkahuApi = HttpApi.make("akahu").add(
       query: {
         amount_as_number: Schema.Literal("true"),
         cursor: Schema.optional(Schema.String),
+        start: Schema.optional(DateUtc),
       },
       success: PaginatedResponse(PendingTransaction),
     }),

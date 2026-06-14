@@ -52,6 +52,7 @@ export class Akahu extends Context.Service<
     }): Stream.Stream<Transaction, AkahuRpcError, AkahuCredentials>
     pendingTransactions(options: {
       readonly accountId: AccountId
+      readonly start?: DateTime.Utc | undefined
     }): Stream.Stream<PendingTransaction, AkahuRpcError, AkahuCredentials>
   }
 >()("server/Akahu") {

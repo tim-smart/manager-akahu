@@ -1,5 +1,5 @@
 import { Manager } from "@/Manager"
-import { Context, DateTime, Effect, Layer, Resource } from "effect"
+import { Context, DateTime, Effect, Layer, Option, Resource } from "effect"
 import {
   buildLinkedAccountTransferRules,
   LinkedAccount,
@@ -436,7 +436,7 @@ export const collectManagerAkahuAccountSelections = (options: {
     } as const
     const akahuStartDate = DateTime.make(
       account.customFields2?.dates?.[options.akahuStartDateFieldKey] as string,
-    )
+    ).pipe(Option.map(DateTime.removeTime))
 
     if (akahuAccount) {
       const transferRulesResult = buildLinkedAccountTransferRules({
